@@ -21,6 +21,13 @@ log_warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
 log_error() { echo -e "${RED}❌ $1${NC}"; exit 1; }
 
 # ============================================
+# AUTO-DETECT USER
+# ============================================
+# Determine which user is running this (not root)
+DEPLOY_USER="${SUDO_USER:-motoadmin}"
+log_info "Deploying as user: $DEPLOY_USER"
+
+# ============================================
 # STEP 1: System Check & Update
 # ============================================
 
@@ -44,7 +51,7 @@ if command -v docker &> /dev/null; then
 else
     curl -fsSL https://get.docker.com -o get-docker.sh
     sh get-docker.sh
-    usermod -aG docker ubuntu
+    usermod -aG docker "$DEPLOY_USER"
     rm get-docker.sh
     log_success "Docker installed"
 fi
@@ -87,7 +94,7 @@ log_success "Node.js $(node --version) installed"
 
 log_info "Step 5: Setting up repository..."
 
-REPO_DIR="/home/ubuntu/motomate"
+REPO_DIR="/home/$DEPLOY_USER/motomate"
 REPO_URL="${1:-https://github.com/your-username/motomate.git}"
 
 if [ ! -d "$REPO_DIR" ]; then
@@ -114,7 +121,7 @@ log_info "Step 6: Configuring .env..."
 if [ ! -f ".env" ]; then
     cp .env.example .env
     log_warning "IMPORTANT! Edit .env with your configuration:"
-    log_warning "   nano /home/ubuntu/motomate/.env"
+    log_warning "   nano /home/$DEPLOY_USER/motomate/.env"
     log_warning ""
     log_warning "Required values:"
     log_warning "  • POSTGRES_PASSWORD (strong password)"
@@ -244,12 +251,12 @@ log_success "SSL certificate installed & auto-renewal enabled"
 
 log_info "Step 12: Setting up automated backups..."
 
-mkdir -p /home/ubuntu/backups
+mkdir -p /home/$DEPLOY_USER/backups
 
-cat > /home/ubuntu/backup.sh <<'BACKUP_SCRIPT'
+cat > /home/$DEPLOY_USER/backup.sh <<'BACKUP_SCRIPT'
 #!/bin/bash
-cd /home/ubuntu/motomate
-BACKUP_DIR="/home/ubuntu/backups"
+cd /home/$DEPLOY_USER/motomate
+BACKUP_DIR="/home/$DEPLOY_USER/backups"
 mkdir -p $BACKUP_DIR
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_FILE="$BACKUP_DIR/motomate_$TIMESTAMP.sql.gz"
@@ -265,12 +272,12 @@ find $BACKUP_DIR -name "motomate_*.sql.gz" -mtime +30 -delete
 echo "✅ Backup: $BACKUP_FILE"
 BACKUP_SCRIPT
 
-chmod +x /home/ubuntu/backup.sh
+chmod +x /home/$DEPLOY_USER/backup.sh
 
 # Add cron job (daily at 3 AM)
-CRON_CMD="0 3 * * * /home/ubuntu/backup.sh >> /var/log/motomate-backup.log 2>&1"
-(crontab -u ubuntu -l 2>/dev/null || true) | grep -v "backup.sh" | crontab -u ubuntu -
-(crontab -u ubuntu -l 2>/dev/null || true; echo "$CRON_CMD") | crontab -u ubuntu -
+CRON_CMD="0 3 * * * /home/$DEPLOY_USER/backup.sh >> /var/log/motomate-backup.log 2>&1"
+(crontab -u $DEPLOY_USER -l 2>/dev/null || true) | grep -v "backup.sh" | crontab -u $DEPLOY_USER -
+(crontab -u $DEPLOY_USER -l 2>/dev/null || true; echo "$CRON_CMD") | crontab -u $DEPLOY_USER -
 
 log_success "Backups configured (daily at 3 AM)"
 
@@ -291,7 +298,7 @@ cat << SUMMARY
 
 🌍 Domain: https://$DOMAIN
 🖥️  Server IP: $PUBLIC_IP
-📁 Project: /home/ubuntu/motomate
+📁 Project: /home/$DEPLOY_USER/motomate
 🐳 Docker: ✅ Running
 🗄️  PostgreSQL: ✅ Running  
 🚀 Backend: ✅ Running (http://localhost:3001)
@@ -317,12 +324,12 @@ Connect to PostgreSQL:
   docker-compose exec -T postgres psql -U motomate_user -d motomate
 
 Update application:
-  cd /home/ubuntu/motomate
+  cd /home/$DEPLOY_USER/motomate
   git pull origin main
   docker-compose up -d --build
 
 Manual backup:
-  /home/ubuntu/backup.sh
+  /home/$DEPLOY_USER/backup.sh
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
