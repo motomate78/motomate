@@ -41,7 +41,7 @@ model User {
   updated_at           DateTime @updatedAt
 
   // Relations
-  images               Image[]
+  gallery_images       Image[]
   sentLikes            Like[]   @relation("UserSentLikes")
   receivedLikes        Like[]   @relation("UserReceivedLikes")
   chats1               Chat[]   @relation("ChatParticipant1")
