@@ -3,6 +3,9 @@ import { Search, Heart, MapPin, MessageCircle, User, X, Gauge, Music, Shield, Ta
 import ApiManager from './ApiManager';
 import { apiClient } from '../apiClient';
 import { userService, eventService, groupChatService, compressImage } from '../apiService';
+import { useGeolocation } from '../hooks/useGeolocation';
+import { CityAutocomplete } from './CityAutocomplete';
+import { AddressAutocomplete } from './AddressAutocomplete';
 const EventsMap = React.lazy(() => import('./EventsMap'));
 
 const isValidAdultAge = (age) => Number.isInteger(age) && age >= 18;
@@ -696,6 +699,10 @@ const MainApp = () => {
   const isProfileLocked = Boolean(userData) && !profileCompleted;
   const isEditingProcess = showSettings || showAppSettings;
   const shouldEnforceProfileLock = isProfileLocked && !isEditingProcess;
+
+  // Геолокация
+  const yandexApiKey = String(import.meta.env.VITE_YANDEX_API_KEY || '').trim();
+  const { city: detectedCity, coordinates: detectedCoordinates, loading: geoLoading, error: geoError, requestGeolocation, retry: retryGeolocation } = useGeolocation(yandexApiKey, false);
 
   useEffect(() => {
     const cityText = String(userData?.city || '').trim();
@@ -2978,24 +2985,41 @@ const MainApp = () => {
                   />
                 </div>
                 <div className="space-y-2"><label className="text-[10px] font-black text-zinc-600 uppercase">Город *</label>
-                  <div className="w-full bg-white/5 border border-white/10 rounded-2xl p-4">
-                    <SuggestAutocomplete
-                      value={userData.city || ''}
-                      onChange={(value) => setUserData({ ...userData, city: value, latitude: null, longitude: null })}
-                      onSelect={(suggestion) => {
-                        if (suggestion?.coords) {
-                          setUserData((prev) => ({
-                            ...prev,
-                            city: suggestion.text,
-                            latitude: suggestion.coords.latitude,
-                            longitude: suggestion.coords.longitude,
-                          }));
-                        }
-                      }}
-                      placeholder="Введите город"
-                      type="locality"
-                    />
+                  <div className="flex gap-2 items-stretch">
+                    <div className="flex-1">
+                      <CityAutocomplete
+                        value={userData.city || ''}
+                        onChange={(value) => setUserData({ ...userData, city: value, latitude: null, longitude: null })}
+                        placeholder="Введите город"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => requestGeolocation()}
+                      disabled={geoLoading}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/50 disabled:cursor-not-allowed text-white rounded-xl font-semibold transition-all active:scale-95 flex items-center justify-center gap-2 text-sm"
+                      title="Определить город по геолокации"
+                    >
+                      {geoLoading ? (
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      ) : (
+                        <Navigation size={16} />
+                      )}
+                      Авто
+                    </button>
                   </div>
+                  {detectedCity && userData.city !== detectedCity && (
+                    <button
+                      type="button"
+                      onClick={() => setUserData({ ...userData, city: detectedCity, latitude: detectedCoordinates?.lat, longitude: detectedCoordinates?.lon })}
+                      className="text-xs text-blue-400 hover:text-blue-300 mt-2 p-2 bg-blue-600/10 rounded-lg w-full"
+                    >
+                      ✓ Найден город: {detectedCity}
+                    </button>
+                  )}
+                  {geoError && (
+                    <p className="text-xs text-red-400 mt-1">{geoError}</p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-zinc-600 uppercase">Пол *</label>
@@ -3343,22 +3367,21 @@ const MainApp = () => {
                     />
                   </div>
                 </div>
-                <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-2xl p-4">
-                    <MapPinIcon size={18} className="text-zinc-400 flex-shrink-0" />
-                    <SuggestAutocomplete
+                <div className="space-y-2">
+                    <label className="block text-[10px] font-black text-zinc-500 mb-1.5 ml-1 uppercase tracking-widest">Место встречи</label>
+                    <AddressAutocomplete
                       value={newEvent.address}
-                      onChange={(value) => setNewEvent({...newEvent, address: value, latitude: null, longitude: null})}
-                      onSelect={(suggestion) => {
+                      onChange={(result) => {
                         setNewEvent((prev) => ({
                           ...prev,
-                          address: suggestion.text,
-                          latitude: suggestion.coords?.latitude ?? null,
-                          longitude: suggestion.coords?.longitude ?? null,
+                          address: result.address || result,
+                          latitude: result.coordinates?.lat ?? null,
+                          longitude: result.coordinates?.lon ?? null,
                         }));
                       }}
-                      placeholder="Место встречи"
-                      userCity={userData?.city || ''}
-                      type="geo"
+                      city={userData?.city || ''}
+                      yandexMapsKey={yandexApiKey}
+                      placeholder="Адрес события..."
                     />
                   </div>
                 <div>
