@@ -31,7 +31,7 @@ function ensureYmaps(apiKey) {
 }
 
 export default function EventsMap({ userData, bikers = [], events = [] }) {
-  const apiKey = import.meta.env.VITE_YANDEX_MAPS_API_KEY;
+  const apiKey = import.meta.env.VITE_YANDEX_API_KEY;
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const geoRef = useRef(null);
@@ -193,12 +193,31 @@ export default function EventsMap({ userData, bikers = [], events = [] }) {
     };
   }, [apiKey, center, objects]);
 
+  // Обработка изменения размера контейнера
+  useEffect(() => {
+    if (!mapRef.current || !isReady) return;
+    
+    const handleResize = () => {
+      if (mapRef.current) {
+        mapRef.current.container.fitToViewport();
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    // Вызываем сразу после монтирования/обновления
+    setTimeout(handleResize, 100);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [isReady]);
+
   if (!apiKey) {
     return (
       <div className="h-full w-full rounded-[32px] border border-white/10 bg-white/5 backdrop-blur-xl p-6">
         <p className="text-sm text-zinc-300 font-bold uppercase tracking-widest">Карта</p>
         <p className="text-xs text-zinc-500 mt-3">
-          Не задан ключ Яндекс.Карт. Добавьте <span className="text-orange-500 font-bold">VITE_YANDEX_MAPS_API_KEY</span> в .env.
+          Не задан ключ Яндекс.Карт. Добавьте <span className="text-orange-500 font-bold">VITE_YANDEX_API_KEY</span> в .env.
         </p>
       </div>
     );
@@ -219,13 +238,6 @@ export default function EventsMap({ userData, bikers = [], events = [] }) {
         <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-white/5 to-white/0 pointer-events-none" />
       )}
       <div ref={containerRef} className="w-full h-full" />
-      {isReady && objects.filter(o => o.type !== 'me').length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="px-4 py-3 rounded-2xl bg-black/60 border border-white/10 backdrop-blur-xl text-xs text-zinc-300">
-            Пока нет точек на карте в вашем городе
-          </div>
-        </div>
-      )}
     </div>
   );
 }

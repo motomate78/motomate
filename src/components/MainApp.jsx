@@ -6,7 +6,6 @@ import { userService, eventService, groupChatService, compressImage } from '../a
 import { useGeolocation } from '../hooks/useGeolocation';
 import { useAddressSuggest } from '../hooks/useAddressSuggest';
 import { CityAutocomplete } from './CityAutocomplete';
-import { AddressAutocomplete } from './AddressAutocomplete';
 const EventsMap = React.lazy(() => import('./EventsMap'));
 
 const isValidAdultAge = (age) => Number.isInteger(age) && age >= 18;
@@ -459,10 +458,13 @@ const MainApp = () => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
+          const { latitude, longitude } = position.coords;
           setUserLocation({
-            lat: position.coords.latitude,
-            lng: position.coords.longitude
+            lat: latitude,
+            lng: longitude
           });
+          // Сохраняем координаты в userData для отображения на карте
+          setUserData(prev => prev ? { ...prev, latitude, longitude } : prev);
           // Автоцентрируем карту при первом запуске
           try {
             setActiveTab((t) => t); // no-op; map component reads userLocation
@@ -3026,6 +3028,7 @@ const MainApp = () => {
                         value={userData.city || ''}
                         onChange={(value) => setUserData({ ...userData, city: value, latitude: null, longitude: null })}
                         placeholder="Введите город"
+                        yandexMapsKey={yandexApiKey}
                       />
                     </div>
                     <button
@@ -3056,15 +3059,7 @@ const MainApp = () => {
                     <p className="text-xs text-red-400 mt-1">{geoError}</p>
                   )}
                 </div>
-                <div className="space-y-2"><label className="text-[10px] font-black text-zinc-600 uppercase">Адрес или место встреч</label>
-                  <AddressAutocomplete
-                    value={userData.address || ''}
-                    onChange={(result) => setUserData({ ...userData, address: result.address || result })}
-                    city={userData.city || ''}
-                    yandexMapsKey={yandexApiKey}
-                    placeholder="Где ты обычно катаешься..."
-                  />
-                </div>
+
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-zinc-600 uppercase">Пол *</label>
                   <select 
@@ -3174,7 +3169,6 @@ const MainApp = () => {
                         name: userData.name || null,
                         age: userData.age || null,
                         city: userData.city,
-                        address: userData.address || null,
                         bike: userData.bike,
                         has_bike: userData.has_bike,
                         gender: userData.gender,
@@ -3313,18 +3307,13 @@ const MainApp = () => {
                      <button
                        onClick={() => {
                          const newValue = !userData?.is_private;
-                        // TEMP: local only, server save on profile "Сохранить" button.
                         setUserData((prev) => ({ ...prev, is_private: newValue }));
                        }}
                       aria-pressed={Boolean(userData?.is_private)}
-                       className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors duration-200 ${
-                         userData?.is_private ? 'bg-orange-600' : 'bg-zinc-600'
-                       }`}
+                       className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors duration-200 ${userData?.is_private ? 'bg-orange-600' : 'bg-zinc-600'}`}
                      >
                        <span
-                        className={`absolute left-1 h-6 w-6 transform rounded-full bg-white transition-transform duration-200 shadow-sm ${
-                          userData?.is_private ? 'translate-x-6' : 'translate-x-0'
-                         }`}
+                        className={`absolute left-0.5 h-6 w-6 transform rounded-full bg-white transition-transform duration-200 shadow-sm ${userData?.is_private ? 'translate-x-5' : 'translate-x-0'}`}
                        />
                      </button>
                    </div>

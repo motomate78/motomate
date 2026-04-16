@@ -11,7 +11,15 @@ self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
-        return cache.addAll(urlsToCache);
+        // Кэшируем каждый URL отдельно с обработкой ошибок
+        return Promise.all(
+          urlsToCache.map(url => {
+            return cache.add(url).catch(err => {
+              console.error(`Failed to cache ${url}:`, err);
+              // Не прерываем установку если один URL не доступен
+            });
+          })
+        );
       })
   );
 });
