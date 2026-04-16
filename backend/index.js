@@ -748,6 +748,19 @@ router.get('/users/:id', authenticateToken, async (req, res) => {
       }
     }
 
+    // Load gallery images from Image table
+    try {
+      const galleryImages = await prisma.image.findMany({
+        where: { user_id: req.params.id },
+        orderBy: { order: 'asc' },
+        select: { url: true },
+      });
+      user.gallery = galleryImages.map(img => img.url);
+    } catch (e) {
+      console.error('[users/:id] Error loading gallery:', e);
+      user.gallery = [];
+    }
+
     res.json(user);
   } catch (error) {
     console.error('Get user by id error:', error);
@@ -966,36 +979,42 @@ router.get('/users/profile/images', authenticateToken, async (req, res) => {
 router.post('/users/profile/images', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
-    const { imageData } = req.body;
+    const { imageData, url } = req.body;
 
-    if (!imageData) {
-      return res.status(400).json({ error: 'Missing imageData' });
+    // Support both base64 upload and pre-uploaded URL
+    let imageUrl;
+
+    if (imageData) {
+      // Parse base64 data URI
+      const matches = imageData.match(/^data:([^;]+);base64,(.+)$/);
+      if (!matches) {
+        return res.status(400).json({ error: 'Invalid image format' });
+      }
+
+      const [, mimeType, base64Data] = matches;
+      const buffer = Buffer.from(base64Data, 'base64');
+
+      // Validate file size (max 5MB)
+      if (buffer.length > 5 * 1024 * 1024) {
+        return res.status(400).json({ error: 'Image too large (max 5MB)' });
+      }
+
+      // Validate MIME type
+      const validMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
+      if (!validMimeTypes.includes(mimeType)) {
+        return res.status(400).json({ error: 'Invalid image type' });
+      }
+
+      // Upload to S3
+      const timestamp = Date.now();
+      const fileName = `users/${userId}/images/${timestamp}.jpg`;
+      imageUrl = await uploadToS3(buffer, fileName, mimeType);
+    } else if (url) {
+      // Use pre-uploaded URL (from S3)
+      imageUrl = url;
+    } else {
+      return res.status(400).json({ error: 'Missing imageData or url' });
     }
-
-    // Parse base64 data URI
-    const matches = imageData.match(/^data:([^;]+);base64,(.+)$/);
-    if (!matches) {
-      return res.status(400).json({ error: 'Invalid image format' });
-    }
-
-    const [, mimeType, base64Data] = matches;
-    const buffer = Buffer.from(base64Data, 'base64');
-
-    // Validate file size (max 5MB)
-    if (buffer.length > 5 * 1024 * 1024) {
-      return res.status(400).json({ error: 'Image too large (max 5MB)' });
-    }
-
-    // Validate MIME type
-    const validMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
-    if (!validMimeTypes.includes(mimeType)) {
-      return res.status(400).json({ error: 'Invalid image type' });
-    }
-
-    // Upload to S3
-    const timestamp = Date.now();
-    const fileName = `users/${userId}/images/${timestamp}.jpg`;
-    const imageUrl = await uploadToS3(buffer, fileName, mimeType);
 
     // Save to database
     const image = await prisma.image.create({
@@ -1007,8 +1026,10 @@ router.post('/users/profile/images', authenticateToken, async (req, res) => {
       select: { id: true, url: true, is_main: true, created_at: true },
     });
 
+    console.log('[users/profile/images] Image saved to DB:', image.id);
     res.json({ image });
   } catch (error) {
+    console.error('[users/profile/images] ERROR:', error.message, error.stack);
     logError('users.profile.images.post', error, { userId: req.user?.userId });
     res.status(500).json({ error: 'Failed to upload image' });
   }
