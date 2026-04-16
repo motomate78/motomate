@@ -1,0 +1,39 @@
+{
+  "name": "motomate-backend",
+  "version": "1.0.0",
+  "description": "MotoMate backend for Yandex Cloud Functions",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "prisma:generate": "prisma generate",
+    "prisma:push": "prisma db push",
+    "seed": "node prisma/seed.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.679.0",
+    "@prisma/client": "^5.22.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "passport": "^0.7.0",
+    "passport-vkontakte": "^0.5.0",
+    "pg": "^8.20.0",
+    "serverless-http": "^4.0.0",
+    "socket.io": "^4.8.1",
+    "sqlite3": "^6.0.1",
+    "zod": "^3.25.76",
+    "web-push": "^3.6.7",
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14",
+    "prisma": "^5.22.0"
+  },
+  "postinstall": "prisma generate"
+}

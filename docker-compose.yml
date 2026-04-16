@@ -1,0 +1,98 @@
+version: '3.8'
+
+# MotoMate - Yandex Cloud Production Setup
+# PostgreSQL на VM в Docker контейнере
+
+services:
+  # ============================================
+  # PostgreSQL 15 Database
+  # ============================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: motomate-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-motomate}
+      POSTGRES_USER: ${POSTGRES_USER:-motomate_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_INITDB_ARGS: "-c timezone=UTC"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-motomate_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - motomate-net
+
+  # ============================================
+  # Node.js/Express Backend
+  # ============================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: motomate-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: "3001"
+      DATABASE_URL: "postgresql://${POSTGRES_USER:-motomate_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-motomate}"
+      JWT_SECRET: "${JWT_SECRET}"
+      CORS_ORIGINS: "${CORS_ORIGINS}"
+      RATE_LIMIT_PER_MINUTE: "${RATE_LIMIT_PER_MINUTE:-120}"
+      YANDEX_CLIENT_ID: "${YANDEX_CLIENT_ID}"
+      YANDEX_CLIENT_SECRET: "${YANDEX_CLIENT_SECRET}"
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}"
+      AWS_REGION: "${AWS_REGION:-ru-central1}"
+      S3_BUCKET: "${S3_BUCKET}"
+      S3_ENDPOINT: "${S3_ENDPOINT:-https://storage.yandex-cloud.net}"
+      VAPID_PUBLIC_KEY: "${VAPID_PUBLIC_KEY}"
+      VAPID_PRIVATE_KEY: "${VAPID_PRIVATE_KEY}"
+    volumes:
+      - backend_logs:/app/logs
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - motomate-net
+
+  # ============================================
+  # React Frontend (Nginx сервер)
+  # ============================================
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_YANDEX_API_KEY: "${VITE_YANDEX_API_KEY}"
+        VITE_API_URL: "${VITE_API_URL:-http://localhost:3001}"
+    container_name: motomate-frontend
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    networks:
+      - motomate-net
+
+# ============================================
+# Volumes & Networks
+# ============================================
+
+volumes:
+  postgres_data:
+    driver: local
+  backend_logs:
+    driver: local
+
+networks:
+  motomate-net:
+    driver: bridge
+

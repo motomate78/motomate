@@ -1,0 +1,32 @@
+{
+  "name": "motomate-backend",
+  "version": "1.0.0",
+  "description": "MotoMate backend for Yandex Cloud",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "dev-sqlite": "node index-sqlite.js",
+    "setup-sqlite": "node setup-sqlite.js",
+    "build": "echo 'No build needed for Node.js'",
+    "postinstall": "prisma generate"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "@aws-sdk/client-s3": "^3.679.0",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "passport": "^0.7.0",
+    "passport-vkontakte": "^0.5.0",
+    "cors": "^2.8.5",
+    "helmet": "^7.1.0",
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.5",
+    "sqlite3": "^5.1.6",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "prisma": "^5.22.0",
+    "nodemon": "^3.0.2"
+  }
+}

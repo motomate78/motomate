@@ -10,9 +10,8 @@ export default defineConfig({
       output: {
         manualChunks: {
           vendor: ['react', 'react-dom'],
-          supabase: ['@supabase/supabase-js'],
-          leaflet: ['leaflet', 'react-leaflet'],
-          icons: ['lucide-react']
+        // Leaflet removed (migrated to Yandex Maps)
+          ui: ['lucide-react']
         }
       }
     },

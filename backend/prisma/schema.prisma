@@ -1,0 +1,139 @@
+// Prisma schema for MotoMate PostgreSQL (production)
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                   String   @id @default(cuid())
+  email                String   @unique
+  password_hash        String?
+  auth_provider        String?  @default("yandex") // yandex | vk | email
+  vk_id                String?
+  name                 String?
+  age                  Int?
+  city                 String?
+  bike                 String?
+  gender               String?
+  has_bike             Boolean  @default(false)
+  about                String?
+  temp                 String?
+  music                String?
+  equip                String?
+  goal                 String?
+  image                String?
+  images               String?  @default("[]")
+  has_seen_welcome     Boolean  @default(false)
+  latitude             Float?
+  longitude            Float?
+  location_updated_at DateTime?
+  is_private           Boolean  @default(false)
+  agreed_privacy       Boolean  @default(false)
+  agreed_cookies       Boolean  @default(false)
+  agreed_license       Boolean  @default(false)
+  agreed_at            DateTime @default(now())
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
+
+  // Relations
+  sentLikes            Like[]   @relation("UserSentLikes")
+  receivedLikes        Like[]   @relation("UserReceivedLikes")
+  chats1               Chat[]   @relation("ChatParticipant1")
+  chats2               Chat[]   @relation("ChatParticipant2")
+  sentMessages         Message[] @relation("MessageSender")
+  createdEvents        Event[]  @relation("EventCreator")
+  pushSubscriptions    PushSubscription[]
+
+  @@map("users")
+}
+
+model PushSubscription {
+  id         String   @id @default(cuid())
+  user_id    String
+  endpoint   String   @unique
+  p256dh_key String
+  auth_key   String
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Relations
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@map("push_subscriptions")
+}
+
+model Chat {
+  id                String    @id @default(cuid())
+  participant_1_id  String
+  participant_2_id  String
+  last_message      String?
+  last_message_time DateTime?
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+
+  // Relations
+  participant1 User @relation("ChatParticipant1", fields: [participant_1_id], references: [id], onDelete: Cascade)
+  participant2 User @relation("ChatParticipant2", fields: [participant_2_id], references: [id], onDelete: Cascade)
+  messages     Message[]
+
+  @@index([participant_1_id])
+  @@index([participant_2_id])
+  @@map("chats")
+}
+
+model Message {
+  id         String   @id @default(cuid())
+  chat_id    String
+  sender_id  String
+  text       String?
+  image      String?
+  type       String   @default("text")
+  created_at DateTime @default(now())
+
+  // Relations
+  chat    Chat @relation(fields: [chat_id], references: [id], onDelete: Cascade)
+  sender  User @relation("MessageSender", fields: [sender_id], references: [id], onDelete: Cascade)
+
+  @@map("messages")
+}
+
+model Like {
+  id            String   @id @default(cuid())
+  from_user_id  String
+  to_user_id    String
+  created_at    DateTime @default(now())
+
+  // Relations
+  fromUser User @relation("UserSentLikes", fields: [from_user_id], references: [id], onDelete: Cascade)
+  toUser   User @relation("UserReceivedLikes", fields: [to_user_id], references: [id], onDelete: Cascade)
+
+  @@index([from_user_id])
+  @@index([to_user_id])
+  @@unique([from_user_id, to_user_id])
+  @@map("likes")
+}
+
+model Event {
+  id            String   @id @default(cuid())
+  title         String
+  description   String?
+  city          String?
+  date          DateTime
+  time          DateTime
+  address       String?
+  link          String?
+  latitude      Float?
+  longitude     Float?
+  created_by_id String
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  // Relations
+  createdBy User @relation("EventCreator", fields: [created_by_id], references: [id], onDelete: Cascade)
+
+  @@map("events")
+}

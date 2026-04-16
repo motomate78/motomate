@@ -4,6 +4,8 @@ import './index.css'
 import App from './App.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 
+// import { apiClient } from './apiClient'
+
 // Регистрация Service Worker
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
@@ -11,31 +13,28 @@ if ('serviceWorker' in navigator) {
       .then(registration => {
         console.log('SW registered: ', registration);
         
-        // Запрос разрешения на push уведомления и подписка
+        // Push уведомления временно отключены для отладки входа
+        /*
         if ('Notification' in window && 'PushManager' in window) {
           Notification.requestPermission().then(async permission => {
             if (permission === 'granted') {
               console.log('Notification permission granted');
               
               try {
-                // Получаем или создаем подписку
                 const subscription = await registration.pushManager.subscribe({
                   userVisibleOnly: true,
                   applicationServerKey: urlB64ToUint8Array('BJjpNkIbnYXoftgL755_wE_IeooVx-pN-Pl_nZM7UpQ_TpUl1tNACNdPBr3q5MqzfdFxoLcW8aIQq8TE8a_ddbE')
                 });
                 
                 console.log('Push subscription:', subscription);
-                
-                // Сохраняем подписку в Supabase
                 await savePushSubscription(subscription);
               } catch (err) {
                 console.log('Push subscription error: ', err);
               }
-            } else {
-              console.log('Notification permission denied');
             }
           });
         }
+        */
       })
       .catch(registrationError => {
         console.log('SW registration failed: ', registrationError);
@@ -44,54 +43,36 @@ if ('serviceWorker' in navigator) {
 }
 
 // Функция для конвертации VAPID ключа
-function urlB64ToUint8Array(base64String) {
-  const padding = '='.repeat((4 - base64String.length % 4) % 4);
-  const base64 = (base64String + padding)
-    .replace(/-/g, '+')
-    .replace(/_/g, '/');
+// function urlB64ToUint8Array(base64String) {
+//   const padding = '='.repeat((4 - base64String.length % 4) % 4);
+//   const base64 = (base64String + padding)
+//     .replace(/-/g, '+')
+//     .replace(/_/g, '/');
 
-  const rawData = window.atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
+//   const rawData = window.atob(base64);
+//   const outputArray = new Uint8Array(rawData.length);
 
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-  return outputArray;
-}
+//   for (let i = 0; i < rawData.length; ++i) {
+//     outputArray[i] = rawData.charCodeAt(i);
+//   }
+//   return outputArray;
+// }
 
-// Функция для сохранения подписки в Supabase
-async function savePushSubscription(subscription) {
-  try {
-    const userId = localStorage.getItem('userId');
-    if (!userId) {
-      console.log('User not logged in, skipping subscription save');
-      return;
-    }
+// Функция для сохранения подписки
+// async function savePushSubscription(subscription) {
+//   try {
+//     const userId = localStorage.getItem('userId');
+//     if (!userId) {
+//       console.log('User not logged in, skipping subscription save');
+//       return;
+//     }
 
-    const response = await fetch(`${process.env.REACT_APP_SUPABASE_URL}/functions/v1/save-push-subscription`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.REACT_APP_SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        userId,
-        endpoint: subscription.endpoint,
-        p256dhKey: subscription.keys.p256dh,
-        authKey: subscription.keys.auth
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error('Failed to save subscription');
-    }
-
-    const result = await response.json();
-    console.log('Push subscription saved:', result);
-  } catch (error) {
-    console.error('Error saving push subscription:', error);
-  }
-}
+//     await apiClient.subscribePush(subscription);
+//     console.log('Push subscription saved successfully');
+//   } catch (error) {
+//     console.error('Ошибка сохранения push-подписки:', error);
+//   }
+// }
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

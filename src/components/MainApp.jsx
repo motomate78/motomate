@@ -1,21 +1,32 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, Suspense } from 'react';
 import { Search, Heart, MapPin, MessageCircle, User, X, Gauge, Music, Shield, Target, Edit3, Settings, LogOut, ChevronLeft, ChevronRight, ChevronDown, MessageSquare, Send, Camera, Navigation, Zap, Trash2, Ban, Image as ImageIcon, Plus, Calendar, Clock, MapPin as MapPinIcon, Smile, Database, Loader2, Check, CheckCheck, Info, ArrowRight, Maximize2, Minimize2 } from 'lucide-react';
-import SupabaseManager from './SupabaseManager';
-import { supabase } from '../supabaseClient';
-import { userService, compressImage, groupChatService, eventService } from '../supabaseService';
-import { cities } from '../data/cities';
-import 'leaflet/dist/leaflet.css';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
-import L from 'leaflet';
+import ApiManager from './ApiManager';
+import { apiClient } from '../apiClient';
+import { userService, eventService, groupChatService, compressImage } from '../apiService';
+const EventsMap = React.lazy(() => import('./EventsMap'));
 
-// Компонент для автоподстановки адресов
-const AddressAutocomplete = ({ value, onChange, placeholder }) => {
+const isValidAdultAge = (age) => Number.isInteger(age) && age >= 18;
+
+const isRequiredProfileFilled = (profile) => {
+  if (!profile) return false;
+  const cityText = String(profile.city || '').trim();
+  return Boolean(profile.name?.trim())
+    && isValidAdultAge(Number(profile.age))
+    && cityText.length > 2
+    && Boolean(profile.gender);
+};
+
+// Компонент для автоподстановки адресов/городов через Yandex Suggest
+const SuggestAutocomplete = ({ value, onChange, onSelect, placeholder, userCity = '', type = 'geo' }) => {
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [loading, setLoading] = useState(false);
   const inputRef = useRef(null);
+  const debounceTimeoutRef = useRef(null);
+  const yandexApiKey = String(import.meta.env.VITE_YANDEX_API_KEY || '').trim();
+  const suggestEnabled = yandexApiKey.length > 0;
 
-  const fetchSuggestions = async (query) => {
+  const fetchSuggestions = useCallback(async (query) => {
     if (!query || query.length < 2) {
       setSuggestions([]);
       return;
@@ -23,58 +34,60 @@ const AddressAutocomplete = ({ value, onChange, placeholder }) => {
 
     setLoading(true);
     try {
-      // Используем Яндекс Карты API для подсказок (если есть ключ)
-      if (process.env.REACT_APP_YANDEX_API_KEY) {
-        const response = await fetch(
-          `https://suggest-maps.yandex.ru/v1/suggest?apikey=${process.env.REACT_APP_YANDEX_API_KEY}&text=${encodeURIComponent(query)}&type=geo&results=5`
-        );
-        
-        if (response.ok) {
-          const data = await response.json();
-          const addresses = data.results?.map(item => item.text) || [];
-          setSuggestions(addresses.slice(0, 5));
-          return;
-        }
+      if (!suggestEnabled) {
+        setSuggestions([]);
+        return;
       }
-      
-      // Fallback: простые но полезные подсказки на основе города
-      const citySuggestions = [
-        `${query} улица`,
-        `${query} проспект`, 
-        `${query} площадь`,
-        `${query} шоссе`,
-        `${query} бульвар`,
-        `кафе ${query}`,
-        `ресторан ${query}`,
-        `парк ${query}`,
-        `ТЦ ${query}`,
-        `${query} центр`,
-        `м. ${query}`,
-        `ул. ${query}`,
-        `пр. ${query}`,
-        `пл. ${query}`
-      ];
-      
-      setSuggestions(citySuggestions.slice(0, 5));
-      
+
+      const searchText = userCity ? `${userCity}, ${query}` : query;
+      const response = await fetch(
+        `https://suggest-maps.yandex.ru/v1/suggest?apikey=${yandexApiKey}&text=${encodeURIComponent(searchText)}&type=${encodeURIComponent(type)}&results=6&lang=ru_RU`
+      );
+
+      if (!response.ok) {
+        setSuggestions([]);
+        return;
+      }
+
+      const data = await response.json();
+      const normalized = (data.results || []).map((item) => {
+        const title = item.title?.text || item.title || '';
+        const subtitle = item.subtitle?.text || item.subtitle || '';
+        const displayText = [title, subtitle].filter(Boolean).join(', ') || item.text || '';
+        const point = item?.tags?.point || item?.point;
+        const coords = point && typeof point === 'object'
+          ? {
+              latitude: Number(point.lat),
+              longitude: Number(point.lon),
+            }
+          : null;
+        return { text: displayText, coords };
+      }).filter((item) => item.text);
+
+      setSuggestions(normalized);
     } catch (error) {
-      console.error('Error fetching address suggestions:', error);
-      // Минимальный fallback
-      setSuggestions([`${query} улица`, `${query} проспект`, `${query} площадь`]);
+      console.error('Ошибка загрузки подсказок:', error);
+      setSuggestions([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [suggestEnabled, type, userCity, yandexApiKey]);
 
   const handleInputChange = (e) => {
     const newValue = e.target.value;
     onChange(newValue);
-    fetchSuggestions(newValue);
+    if (debounceTimeoutRef.current) {
+      clearTimeout(debounceTimeoutRef.current);
+    }
+    debounceTimeoutRef.current = setTimeout(() => {
+      fetchSuggestions(newValue);
+    }, 300);
     setShowSuggestions(true);
   };
 
   const handleSuggestionClick = (suggestion) => {
-    onChange(suggestion);
+    onChange(suggestion.text);
+    onSelect?.(suggestion);
     setShowSuggestions(false);
     setSuggestions([]);
   };
@@ -87,8 +100,25 @@ const AddressAutocomplete = ({ value, onChange, placeholder }) => {
 
   useEffect(() => {
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+      }
+    };
   }, []);
+
+  if (!suggestEnabled) {
+    return (
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="flex-1 bg-transparent text-sm outline-none text-white placeholder-zinc-500"
+        placeholder={placeholder}
+      />
+    );
+  }
 
   return (
     <div className="relative" ref={inputRef}>
@@ -112,7 +142,7 @@ const AddressAutocomplete = ({ value, onChange, placeholder }) => {
                 onClick={() => handleSuggestionClick(suggestion)}
                 className="w-full text-left px-3 py-2 text-sm text-white hover:bg-white/10 transition-colors first:rounded-t-xl last:rounded-b-xl"
               >
-                {suggestion}
+                {suggestion.text}
               </button>
             ))
           )}
@@ -122,49 +152,45 @@ const AddressAutocomplete = ({ value, onChange, placeholder }) => {
   );
 };
 
-// Fix Leaflet icons - Custom Theme
-delete L.Icon.Default.prototype._getIconUrl;
-
-// Создаем кастомные иконки
-const createCustomIcon = (color, isUser = false) => {
-  return L.divIcon({
-    html: `
-      <div style="
-        background: linear-gradient(135deg, ${color} 0%, ${color}dd 100%);
-        width: ${isUser ? '20px' : '16px'};
-        height: ${isUser ? '20px' : '16px'};
-        border-radius: 50%;
-        border: ${isUser ? '3px' : '2px'} solid white;
-        box-shadow: 0 ${isUser ? '2px 8px' : '2px 6px'} rgba(0,0,0,0.3);
-      "></div>
-    `,
-    className: 'custom-marker',
-    iconSize: [isUser ? 20 : 16, isUser ? 20 : 16],
-    iconAnchor: [isUser ? 10 : 8, isUser ? 10 : 8],
-    popupAnchor: [0, isUser ? -10 : -8],
-    shadowSize: [0, 0]
-  });
-};
-
-// Иконки для разных типов
-const userIcon = createCustomIcon('#ea580c', true); // Оранжевый для текущего пользователя
-const maleIcon = createCustomIcon('#3b82f6'); // Голубой для мужчин
-const femaleIcon = createCustomIcon('#ec4899'); // Розовый для женщин
-
-L.Icon.Default.mergeOptions({
-    iconRetinaUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-orange.png',
-    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-orange.png',
-    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-});
+// Leaflet/OpenStreetMap удалены — используем Яндекс.Карты
 
 const MainApp = () => {
   // --- СОСТОЯНИЯ ПРИЛОЖЕНИЯ ---
-  const [isLoading, setIsLoading] = useState(false); // Не показываем загрузку
-  const [isNewUser, setIsNewUser] = useState(false);
+  // const [isLoading, setIsLoading] = useState(false); // Не показываем загрузку
+  // const [isNewUser, setIsNewUser] = useState(false);
   const [showWelcomeModal, setShowWelcomeModal] = useState(false);
   const [userLocation, setUserLocation] = useState(null);
   const [isMapFullscreen, setIsMapFullscreen] = useState(false);
   const DEFAULT_AVATAR = "https://cdn-icons-png.flaticon.com/512/149/149071.png";
+
+  const formatEventDate = (value) => {
+    if (!value) return '';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return String(value);
+    return new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: 'long' }).format(d);
+  };
+
+  const formatEventTime = (value) => {
+    if (!value) return '';
+    // backend may send ISO date string for "time"
+    const d = new Date(value);
+    if (!Number.isNaN(d.getTime())) {
+      return new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' }).format(d);
+    }
+    // if already "HH:MM"
+    return String(value).slice(0, 5);
+  };
+
+  const formatChatTime = (value) => {
+    if (!value) return '';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return String(value);
+    return new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' }).format(d);
+  };
+
+  // const isProfileComplete = (u) => {
+  //   return isRequiredProfileFilled(u);
+  // };
 
   // Запрос разрешения на уведомления
   const requestNotificationPermission = async () => {
@@ -203,42 +229,32 @@ const MainApp = () => {
         }
         
         // Подписываемся на push уведомления
-        await subscribeToPushNotifications();
+        // await subscribeToPushNotifications(); // TEMPORARILY DISABLED
       } else if (permission === 'denied') {
         console.log('Пользователь запретил уведомления');
         // Можно показать информационное сообщение о важности уведомлений
-      } else if (permission === 'granted') {
-        // Если разрешение уже было получено ранее, все равно подписываемся
-        await subscribeToPushNotifications();
+      } else {
+        console.log('Unknown permission status:', permission);
       }
     } catch (error) {
       console.error('Ошибка запроса разрешения на уведомления:', error);
     }
   };
 
-  // Отправка push уведомления через Supabase Edge Functions
+  // Отправка push уведомления через новый API
   const sendPushNotification = async (title, options = {}) => {
     try {
-      const response = await fetch('https://ikztmdltejodcgxgwzbq.supabase.co/functions/v1/send-push', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjIwODM2NzEwNjd9.YP9DwqV8yucpzzGIvtoj2Sw2RzIAeq2wzbl6_m1tXaBEjLXyWS827IIWe8BBPrkvNWU2JPRCBu4MetcAeFbEBg`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          title,
-          body: options.body || 'Новое уведомление',
-          icon: options.icon || '/favicons/android-chrome-192x192.png',
-          tag: options.tag || 'motopara-notification'
-        })
-      })
-      
-      const result = await response.json()
-      console.log('Push notification result:', result)
-      return result
+      const result = await apiClient.sendPush({
+        title,
+        body: options.body || 'Новое уведомление',
+        icon: options.icon || '/favicons/android-chrome-192x192.png',
+        tag: options.tag || 'motopara-notification'
+      });
+      console.log('Push notification result:', result);
+      return result;
     } catch (error) {
-      console.error('Error sending push notification:', error)
-      return { success: false, error: error.message }
+      console.error('Error sending push notification:', error);
+      return { success: false, error: error.message };
     }
   };
 
@@ -266,78 +282,69 @@ const MainApp = () => {
   };
 
   // Подписка на push уведомления
-  const subscribeToPushNotifications = async () => {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-      console.log('Браузер не поддерживает push уведомления');
-      return;
-    }
+  // const subscribeToPushNotifications = async () => {
+  //   if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+  //     console.log('Браузер не поддерживает push уведомления');
+  //     return;
+  //   }
 
-    // Получаем userId из localStorage, если userData еще не загружен
-    const userId = userData?.id || localStorage.getItem('userId');
+  //   // Получаем userId из localStorage, если userData еще не загружен
+  //   const userId = userData?.id || localStorage.getItem('userId');
     
-    if (!userId) {
-      console.error('Не найден ID пользователя для подписки на push уведомления');
-      return;
-    }
+  //   if (!userId) {
 
-    try {
-      const registration = await navigator.serviceWorker.ready;
-      console.log('Service Worker готов, подписываемся на push уведомления...');
+  //     try {
+  //       const registration = await navigator.serviceWorker.ready;
+  //       console.log('Service Worker готов, подписываемся на push уведомления...');
       
-      const subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlB64ToUint8Array('BJjpNkIbnYXoftgL755_wE_IeooVx-pN-Pl_nZM7UpQ_TpUl1tNACNdPBr3q5MqzfdFxoLcW8aIQq8TE8a_ddbE')
-      });
+  //       const subscription = await registration.pushManager.subscribe({
+  //         userVisibleOnly: true,
+  //         applicationServerKey: urlB64ToUint8Array('BJjpNkIbnYXoftgL755_wE_IeooVx-pN-Pl_nZM7UpQ_TpUl1tNACNdPBr3q5MqzfdFxoLcW8aIQq8TE8a_ddbE')
+  //       });
 
-      console.log('Подписка получена:', subscription);
+  //       console.log('Подписка получена:', subscription);
 
-      // Сохраняем подписку в базу данных
-      const { error } = await supabase
-        .from('push_subscriptions')
-        .upsert({
-          user_id: userId,
-          endpoint: subscription.endpoint,
-          p256dh_key: btoa(String.fromCharCode.apply(null, new Uint8Array(subscription.getKey('p256dh')))),
-          auth_key: btoa(String.fromCharCode.apply(null, new Uint8Array(subscription.getKey('auth'))))
-        });
-
-      if (error) {
-        console.error('Ошибка сохранения подписки:', error);
-      } else {
-        console.log('Подписка на push уведомления успешно сохранена');
-      }
-    } catch (error) {
-      console.error('Ошибка подписки на push уведомления:', error);
-      // Если пользователь ранее отменил подписку, пытаемся создать новую
-      if (error.name === 'AbortError' || error.message.includes('subscription')) {
-        console.log('Пробуем создать новую подписку...');
-        try {
-          const registration = await navigator.serviceWorker.ready;
-          // Сначала удаляем старую подписку если есть
-          const existingSubscription = await registration.pushManager.getSubscription();
-          if (existingSubscription) {
-            await existingSubscription.unsubscribe();
-          }
-          // Создаем новую подписку
-          await subscribeToPushNotifications();
-        } catch (retryError) {
-          console.error('Повторная попытка подписки не удалась:', retryError);
-        }
-      }
-    }
-  };
+  //       // Сохраняем подписку в базу данных через новый API
+  //       try {
+  //         // await apiClient.subscribePush(subscription); // TEMPORARILY DISABLED
+  //         console.log('Подписка на push уведомления отключена');
+  //       } catch (error) {
+  //         console.error('Ошибка сохранения подписки:', error);
+  //       }
+  //     } catch (error) {
+  //       console.error('Ошибка подписки на push уведомления:', error);
+  //       // Если пользователь ранее отменил подписку, пытаемся создать новую
+  //       if (error.name === 'AbortError' || error.message.includes('subscription')) {
+  //         console.log('Пробуем создать новую подписку...');
+  //         try {
+  //           const registration = await navigator.serviceWorker.ready;
+  //           // Сначала удаляем старую подписку если есть
+  //           const existingSubscription = await registration.pushManager.getSubscription();
+  //           if (existingSubscription) {
+  //             await existingSubscription.unsubscribe();
+  //           }
+  //           // Создаем новую подписку
+  //           // await subscribeToPushNotifications(); // TEMPORARILY DISABLED
+  //         } catch (retryError) {
+  //           console.error('Повторная попытка подписки не удалась:', retryError);
+  //         }
+  //       }
+  //     }
+  //   };
+  // };
 
   // Вспомогательная функция для конвертации VAPID ключа
-  const urlB64ToUint8Array = (base64String) => {
-    const padding = '='.repeat((4 - base64String.length % 4) % 4);
-    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-    const rawData = window.atob(base64);
-    const outputArray = new Uint8Array(rawData.length);
-    for (let i = 0; i < rawData.length; ++i) {
-      outputArray[i] = rawData.charCodeAt(i);
-    }
-    return outputArray;
-  };
+  // const urlB64ToUint8Array = (base64String) => {
+  //   const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  //   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  //   const rawData = window.atob(base64);
+  //   const outputArray = new Uint8Array(rawData.length);
+  //   
+  //   for (let i = 0; i < rawData.length; ++i) {
+  //     outputArray[i] = rawData.charCodeAt(i);
+  //   }
+  //   return outputArray;
+  // };
   const formatMessageTime = (createdAt) => {
     if (!createdAt) return '';
     
@@ -376,7 +383,7 @@ const MainApp = () => {
     const grouped = [];
     let currentDate = null;
     
-    messages.forEach((message, index) => {
+    messages.forEach((message) => {
       const messageDate = new Date(message.created_at);
       const dateKey = messageDate.toDateString();
       
@@ -401,36 +408,48 @@ const MainApp = () => {
   };
 
   // Функция геокодирования адреса через Yandex API
-  const geocodeAddress = async (address) => {
-    if (!address) return null;
-    
-    try {
-      const response = await fetch(`https://geocode-maps.yandex.ru/1.x/?apikey=YOUR_YANDEX_API_KEY&geocode=${encodeURIComponent(address)}&format=json`);
-      const data = await response.json();
-      
-      if (data.response.GeoObjectCollection.featureMember.length > 0) {
-        const coords = data.response.GeoObjectCollection.featureMember[0].GeoObject.Point.pos.split(' ');
-        return {
-          lat: parseFloat(coords[1]),
-          lng: parseFloat(coords[0])
-        };
-      }
-    } catch (error) {
-      console.error('Geocoding error:', error);
-    }
-    
-    return null;
-  };
+  // const geocodeAddress = async (address) => {
+  //   if (!address) return null;
+  //   
+  //   try {
+  //     const yandexApiKey = String(import.meta.env.VITE_YANDEX_API_KEY || '').trim();
+  //     if (!yandexApiKey) {
+  //       console.warn('Yandex API key not configured');
+  //       return null;
+  //     }
 
-  const getProfileImage = (user) => {
-    if (user.images && user.images.length > 0) return user.images[0];
-    if (user.image) return user.image;
-    return DEFAULT_AVATAR;
-  };
+  //     const response = await fetch(
+  //       `https://geocode-maps.yandex.ru/1.x/?apikey=${yandexApiKey}&geocode=${encodeURIComponent(address)}&format=json&lang=ru_RU`
+  //     );
+
+  //     if (!response.ok) {
+  //       console.warn('Geocoding request failed');
+  //       return null;
+  //     }
+
+  //     const data = await response.json();
+  //     const point = data.response.GeoObjectCollection.featureMember[0]?.GeoObject.Point?.pos;
+  //     
+  //     if (point) {
+  //       const [lng, lat] = point.split(' ').map(Number);
+  //       return { lat, lng };
+  //     }
+  //   } catch (error) {
+  //     console.error('Geocoding error:', error);
+  //   }
+  //   
+  //   return null;
+  // };
+
+  // const getProfileImage = (user) => {
+  //   if (user.images && user.images.length > 0) return user.images[0];
+  //   if (user.image) return user.image;
+  //   return DEFAULT_AVATAR;
+  // };
 
   const [selectedImage, setSelectedImage] = useState(null); // Для модального окна просмотра всех фото (чат, галерея, профиль)
   const [imageContext, setImageContext] = useState({ type: null, images: [], currentIndex: 0 }); // Контекст просмотра фото
-  const [onlineUsers, setOnlineUsers] = useState(new Set());
+  // const [onlineUsers, setOnlineUsers] = useState(new Set());
 
   useEffect(() => {
     if (navigator.geolocation) {
@@ -440,6 +459,12 @@ const MainApp = () => {
             lat: position.coords.latitude,
             lng: position.coords.longitude
           });
+          // Автоцентрируем карту при первом запуске
+          try {
+            setActiveTab((t) => t); // no-op; map component reads userLocation
+          } catch {
+            console.log('Auto-center map: no-op completed');
+          }
         },
         (error) => {
           console.error("Error getting location:", error);
@@ -448,34 +473,13 @@ const MainApp = () => {
     }
   }, []);
 
-  // Online status tracking with Supabase Presence
-  useEffect(() => {
-    const userId = localStorage.getItem('userId');
-    if (!userId) return;
-
-    const channel = supabase.channel('online_users')
-      .on('presence', { event: 'sync' }, () => {
-        const state = channel.presenceState();
-        const onlineIds = new Set();
-        Object.values(state).forEach(presences => {
-          presences.forEach(presence => {
-            if (presence.user_id) onlineIds.add(presence.user_id);
-          });
-        });
-        setOnlineUsers(onlineIds);
-      })
-      .subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') {
-          await channel.track({ user_id: userId, online_at: new Date().toISOString() });
-        }
-      });
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
+  // Online status tracking - disabled for new API
+  // TODO: Implement online status tracking with new backend
 
   useEffect(() => {
+          if (didRunSessionCheckRef.current) return;
+          didRunSessionCheckRef.current = true;
+
           const checkSession = async () => {
               console.log('Checking session...');
               
@@ -486,50 +490,65 @@ const MainApp = () => {
               }, 10000); // 10 секунд
               
               try {
-                  const { data: { session } } = await supabase.auth.getSession();
-                  console.log('Session found:', !!session);
+                  const token = localStorage.getItem('motomate_token');
+                  console.log('Token found:', !!token);
                   
-                  if (session) {
-                      localStorage.setItem('userId', session.user.id);
+                  if (token) {
+                      const userId = localStorage.getItem('userId');
                       
-                      // Запрашиваем разрешение на уведомления (не блокируем загрузку)
+                      // Set token in apiClient instance
+                      apiClient.setToken(token);
+                      
+                      // Request notification permission (don't block loading)
                       requestNotificationPermission();
                       
                       // Load fresh profile data
                       console.log('Loading user profile...');
-                      let { data: user, error: userError } = await supabase
-                        .from('users')
-                        .select('*')
-                        .eq('id', session.user.id)
-                        .single();
-                      
-                      if (userError) {
-                          console.error('Error loading user profile:', userError);
-                          setError('Ошибка загрузки профиля: ' + userError.message);
+                      let user = null;
+                      try {
+                        user = await apiClient.getProfile();
+                        console.log('User data loaded:', !!user);
+                        clearTimeout(timeout);
+                        
+                        if (user) {
+                            console.log('User profile data:', { 
+                                id: user.id, 
+                                name: user.name, 
+                                age: user.age, 
+                                hasImages: !!user.images,
+                                imagesCount: user.images?.length || 0 
+                            });
+                        }
+                      } catch (error) {
+                        console.error('Error loading user profile:', error);
+                        
+                        // Handle 403/INVALID TOKEN errors
+                        if (error.message.includes('403') || error.message.includes('INVALID TOKEN') || error.message.includes('Unauthorized')) {
+                          console.log('Token invalid, clearing and redirecting...');
+                          apiClient.removeToken();
+                          localStorage.removeItem('motomate_token');
+                          localStorage.removeItem('userId');
+                          setError('Сессия истекла. Пожалуйста, войдите снова.');
+                          // Redirect to login page or reload
+                          setTimeout(() => {
+                            window.location.reload();
+                          }, 2000);
+                        } else {
+                          setError('Ошибка: ' + error.message);
+                        }
+                        clearTimeout(timeout);
                       }
-                      
-                      console.log('User data loaded:', !!user);
-                      if (user) {
-                          console.log('User profile data:', { 
-                              id: user.id, 
-                              name: user.name, 
-                              age: user.age, 
-                              hasImages: !!user.images,
-                              imagesCount: user.images?.length || 0 
-                          });
-                      }
-                      clearTimeout(timeout);
                   
                   // Если профиля нет, создаем его с пустыми полями
                   if (!user) {
                      const defaultProfile = {
-                       id: session.user.id,
-                       email: session.user.email,
-                       name: session.user.user_metadata?.full_name || null, // Берем имя из метаданных регистрации
-                       age: null, // Пустое по умолчанию
-                       city: session.user.user_metadata?.city || "Москва",
+                       id: userId,
+                       email: localStorage.getItem('userEmail') || '',
+                       name: null,
+                       age: null,
+                       city: "Moscow",
                        bike: "",
-                       gender: session.user.user_metadata?.gender || "male",
+                       gender: "male",
                        has_bike: false,
                        about: null,
                        image: null,
@@ -538,14 +557,14 @@ const MainApp = () => {
                        created_at: new Date().toISOString()
                      };
                      
-                     const { data: newProfile, error } = await supabase
-                       .from('users')
-                       .insert([defaultProfile])
-                       .select()
-                       .single();
-                       
-                     if (!error) user = newProfile;
-                     else console.error('Error creating profile:', error);
+                     setUserData(defaultProfile);
+                     
+                     // TEMP: disable auto-save to avoid request storm (save only by button)
+                     // try {
+                     //   await apiClient.updateProfile(defaultProfile);
+                     // } catch (insertError) {
+                     //   console.error('Error creating user profile:', insertError);
+                     // }
                   }
                     
                   if (user) {
@@ -564,22 +583,24 @@ const MainApp = () => {
                     // Повторно пытаемся подписаться на push уведомления после загрузки userData
                     if (Notification.permission === 'granted') {
                       console.log('Повторная попытка подписки на push уведомления после загрузке профиля');
-                      subscribeToPushNotifications();
+                      // subscribeToPushNotifications(); // TEMPORARILY DISABLED
                     }
                     
                     // Проверяем, новый ли это пользователь (пустой профиль)
                     // Показываем приветствие только если профиль действительно пустой и пользователь еще не видел приветствие
-                    const isEmptyProfile = !user.name || !user.age || !user.bio || !user.images || user.images.length === 0;
+                    console.log('DEBUG: userData before WelcomeModal check:', user);
+                    const isEmptyProfile = !isRequiredProfileFilled(user);
                     
                     if (isEmptyProfile && !user.has_seen_welcome) {
-                      setIsNewUser(true);
+                      // setIsNewUser(true);
                       setShowWelcomeModal(true);
                       
-                      // Обновляем флаг в базе данных
-                      await supabase
-                        .from('users')
-                        .update({ has_seen_welcome: true })
-                        .eq('id', user.id);
+                      // TEMP: disable auto-save to avoid request storm (save only by button)
+                      // try {
+                      //   await apiClient.updateProfile({ has_seen_welcome: true });
+                      // } catch (error) {
+                      //   console.error('Error updating has_seen_welcome:', error);
+                      // }
                     }
                   }
               } else {
@@ -594,6 +615,30 @@ const MainApp = () => {
           checkSession();
         }, []);
 
+  useEffect(() => {
+    const handleApiError = ({ status, message }) => {
+      if (status === 401 || status === 403) {
+        setError('Сессия истекла. Пожалуйста, войдите снова.');
+        setTimeout(() => window.location.reload(), 1200);
+        return;
+      }
+      if (status >= 500) {
+        setError(message || 'Ошибка сервера. Повторите попытку позже.');
+      }
+    };
+    const handleSessionExpired = () => {
+      setError('Сессия истекла. Пожалуйста, войдите снова.');
+      setTimeout(() => window.location.reload(), 1200);
+    };
+
+    apiClient.setErrorHandler(handleApiError);
+    window.addEventListener('motomate:sessionExpired', handleSessionExpired);
+    return () => {
+      apiClient.setErrorHandler(null);
+      window.removeEventListener('motomate:sessionExpired', handleSessionExpired);
+    };
+  }, []);
+
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('search');
   const [showSettings, setShowSettings] = useState(false);
@@ -603,7 +648,7 @@ const MainApp = () => {
   const [hasNewMatchNotification, setHasNewMatchNotification] = useState(false);
   const [messageInput, setMessageInput] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [isTyping, setIsTyping] = useState(false);
+  // const [isTyping, setIsTyping] = useState(false);
   const [isPartnerTyping, setIsPartnerTyping] = useState(false);
   const typingTimeoutRef = useRef(null);
   const [contextMenuMessageId, setContextMenuMessageId] = useState(null);
@@ -613,14 +658,20 @@ const MainApp = () => {
   const [swipedChatId, setSwipedChatId] = useState(null);
   const [showEventModal, setShowEventModal] = useState(false);
   const [viewingProfile, setViewingProfile] = useState(null);
+  const [viewingProfileLoading, setViewingProfileLoading] = useState(false);
   
   // Settings States
   const [isEditingEmail, setIsEditingEmail] = useState(false);
   const [newEmail, setNewEmail] = useState('');
+  const [emailCurrentPassword, setEmailCurrentPassword] = useState('');
+  const [isUpdatingEmail, setIsUpdatingEmail] = useState(false);
   const [isEditingPassword, setIsEditingPassword] = useState(false);
+  const [passwordCurrentPassword, setPasswordCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
+  const [toasts, setToasts] = useState([]);
 
-  // Данные из Supabase
+  // Данные из API
   const [events, setEvents] = useState([]);
   const [bikers, setBikers] = useState([]);
   const [chats, setChats] = useState([]);
@@ -632,17 +683,30 @@ const MainApp = () => {
   const [showGroupChatEmojiPicker, setShowGroupChatEmojiPicker] = useState(false);
   const [showParticipants, setShowParticipants] = useState(false);
 
-  const [newEvent, setNewEvent] = useState({ title: '', description: '', date: '', time: '', address: '', link: '' });
-  const fileInputRef = useRef(null);
+  const [newEvent, setNewEvent] = useState({ title: '', description: '', date: '', time: '', address: '', link: '', latitude: null, longitude: null });
+  // const fileInputRef = useRef(null);
   const profileInputRef = useRef(null);
   const galleryInputRef = useRef(null);
   const chatFileInputRef = useRef(null);
+  const didRunSessionCheckRef = useRef(false);
 
   // Данные пользователя
   const [userData, setUserData] = useState(null);
+  const profileCompleted = isRequiredProfileFilled(userData);
+  const isProfileLocked = Boolean(userData) && !profileCompleted;
+  const isEditingProcess = showSettings || showAppSettings;
+  const shouldEnforceProfileLock = isProfileLocked && !isEditingProcess;
+
+  useEffect(() => {
+    const cityText = String(userData?.city || '').trim();
+    if (cityText.length > 0) return;
+    if (userData?.latitude == null && userData?.longitude == null) return;
+    setUserData((prev) => (prev ? { ...prev, latitude: null, longitude: null } : prev));
+  }, [userData?.city, userData?.latitude, userData?.longitude]);
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [dismissedUserIds, setDismissedUserIds] = useState(() => new Set());
   // const cities = ["Москва", "Санкт-Петербург", "Сочи", "Краснодар"]; // Removed hardcoded cities
 
   // Состояния для свайпов в стиле Tinder
@@ -653,7 +717,7 @@ const MainApp = () => {
   const cardRef = useRef(null);
   const profileScrollRef = useRef(null); // Ref for resetting scroll
 
-  // Фильтруем анкеты: используем данные из Supabase
+  // Фильтруем анкеты: используем данные из API
   const matchedIds = useMemo(() => chats.map(chat => {
       // Ищем ID собеседника (не свой ID)
       const currentUserId = localStorage.getItem('userId');
@@ -667,14 +731,32 @@ const MainApp = () => {
     return bikers.filter(b => 
       !matchedIds.includes(b.id) && 
       b.id !== currentUserId &&
-      b.city === userData?.city
+      b.city === userData?.city &&
+      !dismissedUserIds.has(b.id)
     );
-  }, [bikers, matchedIds, userData?.city]);
+  }, [bikers, matchedIds, userData?.city, dismissedUserIds]);
 
   // Безопасное получение currentBiker с проверкой на существование
   const currentBiker = filteredBikers.length > 0 && currentIndex >= 0 && currentIndex < filteredBikers.length 
     ? filteredBikers[currentIndex] 
     : null;
+  const profileSaveDisabled = !isRequiredProfileFilled(userData);
+  const cityBikers = useMemo(
+    () => bikers.filter((b) => b.city === userData?.city),
+    [bikers, userData?.city]
+  );
+  const cityEvents = useMemo(
+    () => events.filter((e) => e.city === userData?.city),
+    [events, userData?.city]
+  );
+  const mapUserData = useMemo(
+    () => (userData ? {
+      ...userData,
+      latitude: userLocation?.lat ?? userData?.latitude,
+      longitude: userLocation?.lng ?? userData?.longitude,
+    } : null),
+    [userData, userLocation?.lat, userLocation?.lng]
+  );
 
   const [userImages, setUserImages] = useState(() => {
     // Инициализация из localStorage при первом рендере
@@ -722,7 +804,7 @@ const MainApp = () => {
         }
       }
     }
-  }, [chats]);
+  }, [chats, selectedChat]);
 
   // Subscribe to typing indicators
   useEffect(() => {
@@ -731,7 +813,7 @@ const MainApp = () => {
     // Reset typing state when chat changes
     setIsPartnerTyping(false);
 
-    const unsubscribe = window.supabaseManager.subscribeToTyping(selectedChat.id, (payload) => {
+    const unsubscribe = window.apiManager.subscribeToTyping(selectedChat.id, () => {
       setIsPartnerTyping(true);
       
       if (typingTimeoutRef.current) {
@@ -748,6 +830,34 @@ const MainApp = () => {
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
   }, [selectedChat?.id]);
+
+  useEffect(() => {
+    const handleNewMessage = (event) => {
+      const { chatId, message } = event.detail || {};
+      if (!chatId || !message) return;
+      if (message.sender_id === localStorage.getItem('userId')) return;
+
+      const isSameChatOpened = activeTab === 'chats' && selectedChat?.id === chatId;
+      if (isSameChatOpened) return;
+
+      const chat = chats.find((item) => item.id === chatId);
+      const toastId = `${chatId}_${message.id || Date.now()}`;
+      const toastPayload = {
+        id: toastId,
+        title: chat?.name || 'Новое сообщение',
+        text: message.text?.trim() || (message.type === 'image' ? 'Фото' : 'Новое сообщение'),
+        avatar: chat?.image || DEFAULT_AVATAR,
+      };
+
+      setToasts((prev) => [...prev.slice(-2), toastPayload]);
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((toast) => toast.id !== toastId));
+      }, 4200);
+    };
+
+    window.addEventListener('motomate:newMessage', handleNewMessage);
+    return () => window.removeEventListener('motomate:newMessage', handleNewMessage);
+  }, [activeTab, chats, selectedChat?.id]);
 
   // Обновление индекса при изменении фильтров
   useEffect(() => {
@@ -773,6 +883,11 @@ const MainApp = () => {
   const handleLike = async () => {
     if (!currentBiker) return;
     const likedUser = currentBiker;
+    setDismissedUserIds((prev) => {
+      const next = new Set(prev);
+      next.add(likedUser.id);
+      return next;
+    });
     
     setExitDirection('right');
     
@@ -785,8 +900,8 @@ const MainApp = () => {
     }, 300);
 
     try {
-      if (window.supabaseManager && likedUser.id) {
-        const result = await window.supabaseManager.recordLike(likedUser.id);
+      if (window.apiManager && likedUser.id) {
+        const result = await window.apiManager.recordLike(likedUser.id);
         
         if (result.isMatch) {
           const newChat = result.chat;
@@ -802,7 +917,7 @@ const MainApp = () => {
             partnerId: likedUser.id,
             canSendMessage: true // Оба участника могут писать
           };
-          setChats(prev => [...prev, chatData]);
+          setChats(prev => [chatData, ...prev]);
           
           setMatchData(likedUser);
           setHasNewMatchNotification(true);
@@ -832,6 +947,11 @@ const MainApp = () => {
   const handleDislike = async () => {
     if (!currentBiker) return;
     const dislikedUser = currentBiker;
+    setDismissedUserIds((prev) => {
+      const next = new Set(prev);
+      next.add(dislikedUser.id);
+      return next;
+    });
     
     setExitDirection('left');
     
@@ -844,8 +964,8 @@ const MainApp = () => {
     }, 300);
 
     try {
-      if (window.supabaseManager && dislikedUser.id) {
-        await window.supabaseManager.recordDislike(dislikedUser.id);
+      if (window.apiManager && dislikedUser.id) {
+        await window.apiManager.recordDislike(dislikedUser.id);
       }
     } catch (err) {
       console.error('Error in handleDislike:', err);
@@ -932,6 +1052,15 @@ const MainApp = () => {
     }
   }, [activeTab]);
 
+  useEffect(() => {
+    if (shouldEnforceProfileLock) {
+      setShowWelcomeModal(true);
+      if (activeTab !== 'profile') {
+        setActiveTab('profile');
+      }
+    }
+  }, [activeTab, shouldEnforceProfileLock]);
+
   const switchImage = (e) => {
     if (!currentBiker) return;
     
@@ -956,7 +1085,7 @@ const MainApp = () => {
   };
 
   // Функции для навигации по фото в модальном окне
-  const navigateImage = (direction) => {
+  const navigateImage = useCallback((direction) => {
     if (!selectedImage || !imageContext.images.length) return;
     
     const currentIndex = imageContext.images.indexOf(selectedImage);
@@ -971,7 +1100,7 @@ const MainApp = () => {
     
     setSelectedImage(imageContext.images[newIndex]);
     setImageContext(prev => ({ ...prev, currentIndex: newIndex }));
-  };
+  }, [selectedImage, imageContext.images]);
 
   // Обработчик клавиатуры для модального окна
   useEffect(() => {
@@ -989,19 +1118,34 @@ const MainApp = () => {
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [selectedImage, imageContext]);
+ }, [selectedImage, imageContext, navigateImage]);
 
   const openChat = async (chat) => {
     setSelectedChat(chat);
     setActiveTab('chats');
     const updatedChats = chats.map(c => c.id === chat.id ? {...c, unreadCount: 0, isNew: false} : c);
     setChats(updatedChats);
+    // last seen for unread dot
+    try {
+      localStorage.setItem(`chat_last_seen_${chat.id}`, String(Date.now()));
+    } catch {
+      console.log('Failed to save last seen timestamp');
+    }
     // Убираем из новых мэтчей
     setNewMatches(prev => prev.map(m => m.chatId === chat.id ? {...m, isNew: false} : m));
     
     // Mark as read in backend
-    if (window.supabaseManager?.markAsRead) {
-      await window.supabaseManager.markAsRead(chat.id);
+    if (window.apiManager?.markAsRead) {
+      await window.apiManager.markAsRead(chat.id);
+    }
+
+    // Load full message history on open
+    try {
+      const messages = await apiClient.getChatMessages(chat.id);
+      setSelectedChat(prev => prev ? ({ ...prev, messages }) : prev);
+      setChats(prev => prev.map(c => c.id === chat.id ? ({ ...c, messages }) : c));
+    } catch (e) {
+      console.error('Ошибка загрузки сообщений чата:', e);
     }
   };
 
@@ -1019,26 +1163,13 @@ const MainApp = () => {
 
   const updateGallery = async (newImages) => {
     try {
-        const userId = localStorage.getItem('userId');
-        console.log('Updating gallery with images:', newImages);
-        
-        const { error } = await supabase
-            .from('users')
-            .update({ images: newImages }) 
-            .eq('id', userId);
-        
-        if (error) {
-            console.error('Gallery update error:', error);
-            throw error;
-        }
-        
-        setUserImages(newImages);
-        localStorage.setItem('userImages', JSON.stringify(newImages));
-        setUserData(prev => ({ ...prev, images: newImages }));
-        console.log('Gallery updated successfully');
+      console.log('Updating gallery locally (server save on button):', newImages);
+      setUserImages(newImages);
+      localStorage.setItem('userImages', JSON.stringify(newImages));
+      setUserData((prev) => ({ ...prev, images: newImages }));
     } catch (err) {
-        console.error('Error updating gallery:', err);
-        alert('Не удалось обновить галерею. Попробуйте еще раз.');
+      console.error('Error updating gallery locally:', err);
+      alert('Не удалось обновить галерею. Попробуйте еще раз.');
     }
   };
 
@@ -1047,15 +1178,68 @@ const MainApp = () => {
         alert('Введите корректный email');
         return;
     }
+    if (!emailCurrentPassword) {
+      alert('Введите текущий пароль');
+      return;
+    }
     try {
-        const { error } = await supabase.auth.updateUser({ email: newEmail });
-        if (error) throw error;
-        alert('На ваш новый email отправлено письмо для подтверждения.');
+        setIsUpdatingEmail(true);
+        const data = await apiClient.updateEmail(newEmail.trim(), emailCurrentPassword);
+        setUserData((prev) => ({ ...prev, email: data?.user?.email || newEmail.trim() }));
+        localStorage.setItem('userEmail', data?.user?.email || newEmail.trim());
+        alert('Email успешно обновлен');
         setIsEditingEmail(false);
         setNewEmail('');
+        setEmailCurrentPassword('');
     } catch (err) {
-        console.error(err);
-        alert('Ошибка обновления email: ' + err.message);
+        console.error('Ошибка смены почты:', err);
+        alert('Ошибка: ' + err.message);
+    } finally {
+        setIsUpdatingEmail(false);
+    }
+  };
+
+  const handlePasswordUpdate = async () => {
+    if (!passwordCurrentPassword) {
+      alert('Введите текущий пароль');
+      return;
+    }
+    if (!newPassword || newPassword.length < 6) {
+      alert('Новый пароль должен быть не короче 6 символов');
+      return;
+    }
+    try {
+      setIsUpdatingPassword(true);
+      await apiClient.updatePassword(passwordCurrentPassword, newPassword);
+      alert('Пароль успешно обновлен');
+      setIsEditingPassword(false);
+      setPasswordCurrentPassword('');
+      setNewPassword('');
+    } catch (err) {
+      console.error('Ошибка смены пароля:', err);
+      alert('Ошибка: ' + err.message);
+    } finally {
+      setIsUpdatingPassword(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    const firstConfirm = window.confirm('Удалить аккаунт без возможности восстановления?');
+    if (!firstConfirm) return;
+    const secondConfirm = window.confirm('Это действие удалит все ваши данные и фотографии. Продолжить?');
+    if (!secondConfirm) return;
+
+    try {
+      setIsLoggingOut(true);
+      await apiClient.deleteMyAccount();
+      apiClient.removeToken();
+      localStorage.clear();
+      sessionStorage.clear();
+      window.location.href = `${window.location.origin}?accountDeleted=true&t=${Date.now()}`;
+    } catch (err) {
+      console.error('Ошибка удаления аккаунта:', err);
+      alert(`Не удалось удалить аккаунт: ${err.message}`);
+      setIsLoggingOut(false);
     }
   };
 
@@ -1079,7 +1263,7 @@ const MainApp = () => {
                 // Показываем пользователю что происходит сжатие
                 console.log('Сжимаем изображение...');
                 
-                const imageUrl = await userService.uploadAvatar(userId, file);
+                const imageUrl = await userService.uploadAvatar(userId, file, userData?.image || null);
                 console.log('Avatar uploaded:', imageUrl);
                 
                 // Обновляем состояние аватара
@@ -1099,6 +1283,7 @@ const MainApp = () => {
                 }, 500);
             } catch (uploadError) {
                 console.error('Avatar upload error:', uploadError);
+                alert('Avatar upload error: ' + JSON.stringify(uploadError));
                 throw uploadError;
             }
             
@@ -1118,6 +1303,7 @@ const MainApp = () => {
                 await updateGallery([...userImages, imageUrl]);
             } catch (uploadError) {
                 console.error('Gallery upload error:', uploadError);
+                alert('Gallery upload error: ' + JSON.stringify(uploadError));
                 throw uploadError;
             }
             
@@ -1136,31 +1322,24 @@ const MainApp = () => {
                     console.log('Compressed file size:', (compressedFile.size / 1024 / 1024).toFixed(2) + ' MB');
                     
                     const fileExt = 'jpg'; // Всегда сохраняем как JPG после сжатия
-                    const fileName = `${userId}/chat/${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
-                    
-                    const { error: uploadError } = await supabase.storage
-                        .from('chat-images')
-                        .upload(fileName, compressedFile, {
-                            cacheControl: '86400', // 24 часа кэширования
-                            upsert: false
-                        });
+                    const fileName = `chat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
 
-                    if (uploadError) {
-                        console.error('Error uploading chat image:', uploadError);
-                        throw uploadError;
-                    }
+                    const imageDataUrl = await new Promise((resolve, reject) => {
+                      const reader = new FileReader();
+                      reader.onload = (evt) => resolve(evt.target?.result);
+                      reader.onerror = () => reject(new Error('Не удалось прочитать файл изображения'));
+                      reader.readAsDataURL(compressedFile);
+                    });
 
-                    const { data: { publicUrl } } = supabase.storage
-                        .from('chat-images')
-                        .getPublicUrl(fileName);
+                    const { url: publicUrl } = await apiClient.uploadImage(imageDataUrl, fileName);
 
                     console.log('Chat image uploaded successfully:', publicUrl);
 
-                    if (selectedChat && window.supabaseManager) {
-                        await window.supabaseManager.sendMessage(selectedChat.id, '', 'image', publicUrl);
+                    if (selectedChat && window.apiManager) {
+                        await window.apiManager.sendMessage(selectedChat.id, '', 'image', publicUrl);
                         console.log('Chat image message sent successfully');
                     } else {
-                        console.error('No selected chat or supabaseManager available');
+                        console.error('No selected chat or apiManager available');
                     }
                 } catch (imageError) {
                     console.error('Error processing chat image:', imageError);
@@ -1191,26 +1370,25 @@ const MainApp = () => {
         }
 
         const eventData = {
-          title: newEvent.title,
-          description: newEvent.description,
+          title: newEvent.title.trim(),
+          description: newEvent.description?.trim() || null,
           city: userData.city,
           date: newEvent.date,
           time: newEvent.time,
-          address: newEvent.address,
-          link: newEvent.link,
-          created_by_id: userId
+          address: newEvent.address?.trim() || null,
+          link: newEvent.link?.trim() || null,
+          latitude: typeof newEvent.latitude === 'number' ? newEvent.latitude : null,
+          longitude: typeof newEvent.longitude === 'number' ? newEvent.longitude : null,
         };
         
         console.log('🚀 Вызываем eventService.createEvent с данными:', eventData);
-        const { error } = await eventService.createEvent(eventData);
-          
-        if (error) throw error;
+        await eventService.createEvent(eventData);
         
-        setNewEvent({ title: '', description: '', date: '', time: '', address: '', link: '' });
+        setNewEvent({ title: '', description: '', date: '', time: '', address: '', link: '', latitude: null, longitude: null });
         setShowEventModal(false);
         
-        if (window.supabaseManager && window.supabaseManager.loadEvents) {
-          window.supabaseManager.loadEvents();
+        if (window.apiManager && window.apiManager.loadEvents) {
+          window.apiManager.loadEvents();
         }
       } catch (err) {
         console.error('Error creating event:', err);
@@ -1222,7 +1400,7 @@ const MainApp = () => {
   // Функции для групповых чатов
   const openGroupChatFromChats = async (chat) => {
     try {
-      const userId = localStorage.getItem('userId');
+      // const userId = localStorage.getItem('userId');
       
       // Загружаем данные чата
       const groupChatData = await groupChatService.getGroupChat(chat.group_chat_id);
@@ -1349,41 +1527,15 @@ const MainApp = () => {
     }
   };
 
-  const handlePasswordUpdate = async () => {
-    if (!newPassword || newPassword.length < 6) {
-        alert('Пароль должен содержать минимум 6 символов');
-        return;
-    }
-    try {
-        const { error } = await supabase.auth.updateUser({ password: newPassword });
-        if (error) throw error;
-        alert('Пароль успешно обновлен!');
-        setIsEditingPassword(false);
-        setNewPassword('');
-    } catch (err) {
-        console.error(err);
-        alert('Ошибка обновления пароля: ' + err.message);
-    }
-  };
-
-  const clearTestData = async () => {
-    if (!confirm('Вы уверены? Это действие удалит все анкеты кроме вашей. Используйте только для тестов.')) return;
-    try {
-        const currentUserId = localStorage.getItem('userId');
-        const { error } = await supabase
-            .from('users')
-            .delete()
-            .neq('id', currentUserId);
-            
-        if (error) throw error;
-        
-        alert('Тестовые данные очищены. Перезагрузите страницу.');
-        window.location.reload();
-    } catch (err) {
-        console.error(err);
-        alert('Не удалось удалить данные (возможно ограничение прав доступа): ' + err.message);
-    }
-  };
+  // const clearTestData = async () => {
+  //   try {
+  //       // This function would need to be implemented in the new backend
+  //       alert('Функция очистки тестовых данных временно отключена');
+  //   } catch (err) {
+  //       console.error('Error clearing test data:', err);
+  //       alert('Не удалось удалить данные: ' + err.message);
+  //   }
+  // };
 
   const deleteEvent = async (e, eventId) => {
     e.stopPropagation();
@@ -1401,21 +1553,13 @@ const MainApp = () => {
     
     try {
       console.log('Deleting event:', idToDelete);
-      const { error } = await supabase
-        .from('events')
-        .delete()
-        .eq('id', idToDelete);
-        
-      if (error) {
-        console.error('Supabase delete error:', error);
-        throw error;
-      }
+      await apiClient.deleteEvent(idToDelete);
       
       // Optimistic update
       setEvents(prev => prev.filter(e => e.id !== idToDelete));
       
-      if (window.supabaseManager && window.supabaseManager.loadEvents) {
-        window.supabaseManager.loadEvents();
+      if (window.apiManager && window.apiManager.loadEvents) {
+        window.apiManager.loadEvents();
       }
     } catch (err) {
       console.error('Error deleting event:', err);
@@ -1426,7 +1570,7 @@ const MainApp = () => {
   const handleDeleteMessage = async (messageId) => {
     if (window.confirm('Удалить сообщение?')) {
       try {
-        await window.supabaseManager.deleteMessage(messageId);
+        await window.apiManager.deleteMessage(messageId);
         // Remove from local state immediately
         if (selectedChat) {
           const updatedMessages = selectedChat.messages.filter(m => m.id !== messageId);
@@ -1443,17 +1587,14 @@ const MainApp = () => {
 
   const handleOpenProfile = async (partnerId) => {
     try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', partnerId)
-        .single();
-      
-      if (error) throw error;
+      setViewingProfileLoading(true);
+      const data = await apiClient.getUserById(partnerId);
       
        let interests = data.interests;
        if (typeof interests === 'string') {
-         try { interests = JSON.parse(interests); } catch (e) {}
+         try { interests = JSON.parse(interests); } catch (e) {
+          console.log('Failed to parse interests JSON:', e);
+        }
        }
        if (!interests || !Array.isArray(interests)) {
           interests = [
@@ -1492,6 +1633,8 @@ const MainApp = () => {
     } catch (err) {
       console.error("Error fetching profile:", err);
       // alert("Не удалось загрузить профиль");
+    } finally {
+      setViewingProfileLoading(false);
     }
   };
 
@@ -1508,12 +1651,35 @@ const MainApp = () => {
 
     try {
       // Send new message
-      if (window.supabaseManager) {
-        await window.supabaseManager.sendMessage(selectedChat.id, messageInput.trim());
+      let sentMessage = null;
+      if (window.apiManager) {
+        sentMessage = await window.apiManager.sendMessage(selectedChat.id, messageInput.trim());
       }
       
       setMessageInput('');
       setShowEmojiPicker(false);
+
+      const nowIso = new Date().toISOString();
+      const lastText = messageInput.trim();
+
+      // optimistic UI update for last message/time + move chat to top
+      setChats((prev) => {
+        const updated = prev.map((c) => {
+          if (c.id !== selectedChat.id) return c;
+          const nextMessages = sentMessage ? [...(c.messages || []), sentMessage] : (c.messages || []);
+          return {
+            ...c,
+            messages: nextMessages,
+            lastMessage: lastText,
+            time: formatChatTime(nowIso),
+            last_message_time: nowIso,
+          };
+        });
+        const idx = updated.findIndex((c) => c.id === selectedChat.id);
+        if (idx <= 0) return updated;
+        const [item] = updated.splice(idx, 1);
+        return [item, ...updated];
+      });
       
       // Прокрутка к новому сообщению
       setTimeout(() => {
@@ -1542,22 +1708,68 @@ const MainApp = () => {
           const messagesChanged = JSON.stringify(updatedChat.messages) !== JSON.stringify(selectedChat.messages);
           
           if (messagesChanged) {
-             setSelectedChat(prev => ({
+             setSelectedChat(() => ({
                ...updatedChat,
                // Preserve local state if needed, but usually we want fresh data
              }));
              
              // If new messages arrived while chat is open, mark them as read
              const hasUnread = updatedChat.messages.some(m => !m.is_read && m.sender === 'other');
-             if (hasUnread && window.supabaseManager?.markAsRead) {
-                await window.supabaseManager.markAsRead(updatedChat.id);
+             if (hasUnread && window.apiManager?.markAsRead) {
+                await window.apiManager.markAsRead(updatedChat.id);
              }
           }
         }
       }
     };
     syncSelectedChat();
-  }, [chats]);
+  }, [chats, selectedChat]);
+
+  // Realtime message handler (socket.io → CustomEvent)
+  useEffect(() => {
+    const handler = (ev) => {
+      const { chatId, message } = ev.detail || {};
+      if (!chatId || !message) return;
+
+      setChats((prev) => {
+        const updated = prev.map((c) => {
+          if (c.id !== chatId) return c;
+          const nextMessages = Array.isArray(c.messages) ? [...c.messages, message] : [message];
+          const lastText = message.text || (message.type === 'image' ? 'Фото' : '—');
+          const lastTimeIso = message.created_at || new Date().toISOString();
+          const next = {
+            ...c,
+            messages: nextMessages,
+            lastMessage: lastText,
+            time: formatChatTime(lastTimeIso),
+            last_message_time: lastTimeIso,
+          };
+          // unread dot if chat not open and message not mine
+          const currentUserId = localStorage.getItem('userId');
+          const isMine = message.sender_id === currentUserId;
+          if (!isMine && (!selectedChat || selectedChat.id !== chatId)) {
+            next.unreadCount = 1;
+          }
+          return next;
+        });
+
+        // move updated chat to top
+        const idx = updated.findIndex((c) => c.id === chatId);
+        if (idx > 0) {
+          const [item] = updated.splice(idx, 1);
+          updated.unshift(item);
+        }
+        return updated;
+      });
+
+      if (selectedChat?.id === chatId) {
+        setSelectedChat((prev) => prev ? ({ ...prev, messages: Array.isArray(prev.messages) ? [...prev.messages, message] : [message] }) : prev);
+      }
+    };
+
+    window.addEventListener('motomate:newMessage', handler);
+    return () => window.removeEventListener('motomate:newMessage', handler);
+  }, [selectedChat]);
 
 
   // Функция для загрузки полного профиля пользователя
@@ -1609,9 +1821,9 @@ const MainApp = () => {
   return (
     <div className="fixed top-0 left-0 w-full h-full supports-[height:100dvh]:h-[100dvh] bg-black text-white flex flex-col overflow-hidden font-sans animate-in fade-in duration-500">
       
-      {/* Supabase Manager - работает в фоне */}
+      {/* API Manager - works in background */}
       {userData && (
-        <SupabaseManager 
+        <ApiManager 
           userData={userData}
           onUsersLoaded={setBikers}
           onChatsLoaded={setChats}
@@ -1620,7 +1832,7 @@ const MainApp = () => {
       )}
       
       {!selectedChat && !viewingProfile && (
-        <header className="h-16 shrink-0 backdrop-blur-xl bg-black/50 border-b border-white/5 flex items-center justify-between px-6 z-40">
+        <header className="sticky top-0 z-50 h-16 min-h-16 shrink-0 backdrop-blur-xl bg-black/90 border-b border-white/5 flex items-center justify-between px-6">
           <div className="text-lg font-black tracking-tighter italic uppercase">Мото<span className="text-orange-500">Знакомства</span></div>
           <button onClick={() => {setActiveTab('profile');}} className={`w-9 h-9 rounded-full border transition-all flex items-center justify-center overflow-hidden ${activeTab === 'profile' ? 'border-orange-500 bg-orange-500/10' : 'border-white/10 bg-white/5'}`}>
             {userData?.image ? (
@@ -1649,6 +1861,22 @@ const MainApp = () => {
           >
             <X size={24} />
           </button>
+        </div>
+      )}
+
+      {toasts.length > 0 && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[400] w-full max-w-sm px-4 space-y-2 pointer-events-none">
+          {toasts.map((toast) => (
+            <div key={toast.id} className="bg-black/70 border border-white/10 backdrop-blur-2xl rounded-2xl p-3 shadow-2xl">
+              <div className="flex items-center gap-3">
+                <img src={toast.avatar} alt="" className="w-10 h-10 rounded-xl object-cover border border-white/10" />
+                <div className="min-w-0">
+                  <p className="text-xs font-black uppercase tracking-wide text-white truncate">{toast.title}</p>
+                  <p className="text-xs text-zinc-300 truncate">{toast.text}</p>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
@@ -1811,136 +2039,14 @@ const MainApp = () => {
                       <Minimize2 size={20} />
                     </button>
                   )}
-                  
-                  <MapContainer 
-                    center={userLocation ? [userLocation.lat, userLocation.lng] : [
-                      cities.find(c => c.name === userData.city)?.lat || 55.7558, 
-                      cities.find(c => c.name === userData.city)?.lng || 37.6173
-                    ]} 
-                    zoom={11} 
-                    style={{ height: '100%', width: '100%', zIndex: 1 }}
-                    className="z-1"
-                    attributionControl={false}
-                  >
-                  <TileLayer
-                    url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-                    attribution=""
-                  />
-                  {/* User Marker */}
-                   <Marker 
-                     position={userLocation ? [userLocation.lat, userLocation.lng] : [
-                       cities.find(c => c.name === userData.city)?.lat || 55.7558, 
-                       cities.find(c => c.name === userData.city)?.lng || 37.6173
-                     ]} 
-                     icon={userIcon}
-                   >
-                      <Popup className="custom-popup">
-                         <div className="text-black font-bold">Вы здесь</div>
-                      </Popup>
-                   </Marker>
-                   
-                   {/* Bikers Markers */}
-                   {bikers.filter(b => b.city === userData?.city).map((b, idx) => {
-                      const cityCoords = cities.find(c => c.name === userData.city) || { lat: 55.7558, lng: 37.6173 };
-                      // Pseudo-random position based on ID to be consistent across renders
-                      const seed = b.id.charCodeAt(0); 
-                      const latOffset = ((seed % 100) / 100 - 0.5) * 0.1;
-                      const lngOffset = ((seed % 50) / 50 - 0.5) * 0.1;
-                      
-                      // Определяем иконку по полу
-                      const icon = b.gender === 'female' ? femaleIcon : maleIcon;
-                      
-                      return (
-                        <Marker key={b.id} position={[cityCoords.lat + latOffset, cityCoords.lng + lngOffset]} icon={icon}>
-                          <Popup className="custom-popup">
-                            <div className="w-48 bg-[#1c1c1e] text-white p-0 rounded-xl overflow-hidden shadow-xl border border-white/10 flex flex-col">
-                               <div className="h-32 w-full relative shrink-0">
-                                  <img src={b.images[0] || DEFAULT_AVATAR} className="w-full h-full object-cover" alt={b.name}/>
-                                  <div className="absolute inset-0 bg-gradient-to-t from-black/90 to-transparent" />
-                                  <div className="absolute bottom-2 left-3">
-                                     <span className="font-black italic uppercase text-lg leading-none block">{b.name}, {b.age}</span>
-                                     <span className="text-[10px] text-orange-500 font-bold uppercase tracking-wider">{b.has_bike ? b.bike : "Ищу того, кто прокатит"}</span>
-                                  </div>
-                               </div>
-                               <button 
-                                 onClick={() => { setCurrentIndex(bikers.indexOf(b)); setActiveTab('search'); }}
-                                 className="w-full py-3 text-orange-500 font-bold uppercase text-[10px] tracking-widest hover:bg-white/5 transition-colors"
-                               >
-                                 Открыть анкету
-                               </button>
-                            </div>
-                          </Popup>
-                        </Marker>
-                      );
-                   })}
-                   
-                   {/* Events Markers - временно отключаем геокодирование */}
-                   {/* 
-                   {events.filter(e => e.coordinates && e.city === userData?.city).map((event, idx) => {
-                      const eventIcon = L.divIcon({
-                        html: `
-                          <div style="
-                            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-                            width: 36px;
-                            height: 36px;
-                            border-radius: 50%;
-                            border: 3px solid white;
-                            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-                            display: flex;
-                            align-items: center;
-                            justify-content: center;
-                            font-size: 16px;
-                            transform: translateY(-50%);
-                            position: relative;
-                            z-index: 1000;
-                          ">
-                            📅
-                          </div>
-                        `,
-                        className: 'event-marker',
-                        iconSize: [36, 36],
-                        iconAnchor: [18, 36],
-                        popupAnchor: [0, -30],
-                        shadowSize: [0, 0]
-                      });
-                      
-                      return (
-                        <Marker 
-                          key={event.id} 
-                          position={[event.coordinates.lat, event.coordinates.lng]} 
-                          icon={eventIcon}
-                        >
-                          <Popup className="custom-popup">
-                            <div className="w-56 bg-[#1c1c1e] text-white p-0 rounded-xl overflow-hidden shadow-xl border border-white/10">
-                              <div className="p-4">
-                                <h3 className="font-black text-lg mb-2">{event.title}</h3>
-                                <p className="text-sm text-zinc-300 mb-3 line-clamp-2">{event.description}</p>
-                                <div className="space-y-2 text-xs">
-                                  <div className="flex items-center gap-2">
-                                    <Calendar size={14} className="text-orange-500" />
-                                    <span>{event.date} в {event.time}</span>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <MapPin size={14} className="text-orange-500" />
-                                    <span>{event.address}</span>
-                                  </div>
-                                </div>
-                                {event.link && (
-                                  <button 
-                                    onClick={() => window.open(event.link, '_blank')}
-                                    className="w-full mt-3 bg-orange-600 text-white py-2 rounded-lg text-sm font-bold hover:bg-orange-700 transition-colors"
-                                  >
-                                    Подробнее
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          </Popup>
-                        </Marker>
-                      );
-                   })}
-                   */}
-                </MapContainer>
+
+                  <Suspense fallback={<div className="w-full h-full flex items-center justify-center bg-black/20"><Loader2 size={32} className="text-orange-500 animate-spin" /></div>}>
+                    <EventsMap
+                      userData={mapUserData}
+                      bikers={cityBikers}
+                      events={cityEvents}
+                    />
+                  </Suspense>
                 </>
               )}
               
@@ -1949,7 +2055,7 @@ const MainApp = () => {
                   <Navigation className="text-orange-500" size={18} />
                   <div className="flex-1">
                     <p className="text-xs font-black uppercase italic text-white">Байкеры рядом</p>
-                    <p className="text-[10px] text-zinc-500 uppercase">В сети: {bikers.filter(b => b.city === userData?.city).length}</p>
+                    <p className="text-[10px] text-zinc-500 uppercase">В сети: {cityBikers.length}</p>
                   </div>
                   <button
                     onClick={() => setIsMapFullscreen(true)}
@@ -1999,13 +2105,13 @@ const MainApp = () => {
                         {event.date && (
                           <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-lg flex-1 justify-center">
                             <Calendar size={14} className="text-orange-500" />
-                            <span>{event.date}</span>
+                            <span>{formatEventDate(event.date)}</span>
                           </div>
                         )}
                         {event.time && (
                           <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-lg flex-1 justify-center">
                             <Clock size={14} className="text-orange-500" />
-                            <span>{event.time}</span>
+                            <span>{formatEventTime(event.time)}</span>
                           </div>
                         )}
                       </div>
@@ -2096,21 +2202,15 @@ const MainApp = () => {
                         if (existingChat) {
                           openChat(existingChat);
                         } else {
-                          // Если чата еще нет в стейте, загружаем его
+                          // Если чата еще нет в стейте, загружаем его через новый API
                           const loadChat = async () => {
                             try {
-                              const { data: chatData } = await supabase
-                                .from('chats')
-                                .select(`
-                                  *,
-                                  participant_1:participant_1_id(name, image),
-                                  participant_2:participant_2_id(name, image)
-                                `)
-                                .eq('id', match.chatId)
-                                .single();
+                              const chatsData = await apiClient.getChats();
+                              const chatData = chatsData.find(chat => chat.id === match.chatId);
                               
                               if (chatData) {
-                                const partner = chatData.participant_1_id === localStorage.getItem('userId') 
+                                const currentUserId = localStorage.getItem('userId');
+                                const partner = chatData.participant_1_id === currentUserId 
                                   ? chatData.participant_2 
                                   : chatData.participant_1;
                                 
@@ -2213,8 +2313,8 @@ const MainApp = () => {
                             ) : (
                               <img src={chat.image || DEFAULT_AVATAR} className={`w-14 h-14 rounded-[22px] object-cover ${isNewMatch ? 'ring-2 ring-orange-500' : ''}`} alt="" />
                             )}
-                            {!chat.is_group_chat && onlineUsers.has(chat.partnerId) && <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full border-2 border-black"></div>}
-                            {chat.unreadCount > 0 && <div className="absolute -top-1 -right-1 w-6 h-6 bg-orange-600 rounded-full border-4 border-black flex items-center justify-center text-[10px] font-black">{chat.unreadCount}</div>}
+                            {!chat.is_group_chat && /* onlineUsers.has(chat.partnerId) && */ <div className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full border-2 border-black"></div>}
+                            {chat.unreadCount > 0 && <div className="absolute -top-1 -right-1 w-3 h-3 bg-orange-600 rounded-full border-2 border-black" />}
                           </div>
                           <div className="flex-1">
                             <div className="flex justify-between items-center mb-1">
@@ -2291,7 +2391,7 @@ const MainApp = () => {
                   <img src={selectedChat.image || DEFAULT_AVATAR} className="w-10 h-10 rounded-xl object-cover border border-white/10" alt="" />
                 <div>
                 <h4 className="font-bold text-sm uppercase italic">{selectedChat.name || 'Пользователь'}</h4>
-                  {selectedChat.partnerId && onlineUsers.has(selectedChat.partnerId) && <p className="text-[9px] text-green-500 font-bold uppercase">В сети</p>}
+                  {selectedChat.partnerId && /* onlineUsers.has(selectedChat.partnerId) && */ <p className="text-[9px] text-green-500 font-bold uppercase">В сети</p>}
                 </div>
               </button>
             </div>
@@ -2443,8 +2543,8 @@ const MainApp = () => {
                 value={messageInput}
                 onChange={(e) => {
                   setMessageInput(e.target.value);
-                  if (e.target.value.length > 0 && selectedChat && window.supabaseManager) {
-                     window.supabaseManager.sendTyping(selectedChat.id);
+                  if (e.target.value.length > 0 && selectedChat && window.apiManager) {
+                     window.apiManager.sendTyping(selectedChat.id);
                   }
                 }}
                 className="flex-1 bg-white/5 border border-white/10 rounded-[18px] px-4 py-2 text-sm outline-none focus:border-orange-500/50 transition-colors resize-none min-h-[36px] max-h-32 leading-relaxed" 
@@ -2676,7 +2776,12 @@ const MainApp = () => {
               </button>
               <button onClick={() => setShowSettings(true)} data-edit-profile="true" className="absolute bottom-0 right-0 bg-orange-600 p-3 rounded-2xl border-4 border-black text-white transition-transform active:scale-90"><Edit3 size={18} /></button>
             </div>
-            <h2 className="text-2xl font-black uppercase italic mb-2">{userData.name}</h2>
+            <h2 className="text-2xl font-black uppercase italic mb-2 flex items-center gap-2">
+              {userData.name}
+              {userData.is_private && (
+                <div className="w-3 h-3 bg-zinc-500 rounded-full" title="Режим инкогнито"></div>
+              )}
+            </h2>
             <p className="text-zinc-600 text-xs font-bold uppercase tracking-[0.2em] mb-2">{userData.city}</p>
             {(userData.bike || !userData.has_bike) && (
               <div className="flex items-center gap-2 mb-12">
@@ -2758,17 +2863,13 @@ const MainApp = () => {
               <button onClick={async () => {
                  try {
                    setIsLoggingOut(true);
-                   await supabase.auth.signOut();
-                   
-                   // Полная очистка всех данных
-                   localStorage.clear();
+                   // Custom logout
+                   apiClient.removeToken();
+                   localStorage.removeItem('motomate_token');
+                   localStorage.removeItem('userId');
+                   localStorage.removeItem('userData');
                    sessionStorage.clear();
-                   
-                   // Дополнительная очистка Supabase
-                   const { error } = await supabase.auth.signOut({ scope: 'global' });
-                   if (error) {
-                     console.error('Global signout error:', error);
-                   }
+                   localStorage.clear();
                    
                    // Принудительная перезагрузка с очисткой кэша
                    setTimeout(() => {
@@ -2852,9 +2953,9 @@ const MainApp = () => {
                   </div>
                 </div>
 
-                <div className="space-y-2"><label className="text-[10px] font-black text-zinc-600 uppercase">Имя</label><input type="text" value={userData.name} onChange={e => setUserData({...userData, name: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 outline-none focus:border-orange-500" /></div>
+                <div className="space-y-2"><label className="text-[10px] font-black text-zinc-600 uppercase">Имя *</label><input type="text" value={userData.name || ''} onChange={e => setUserData({...userData, name: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 outline-none focus:border-orange-500" /></div>
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-zinc-600 uppercase">Возраст</label>
+                  <label className="text-[10px] font-black text-zinc-600 uppercase">Возраст 18+ *</label>
                   <input 
                     type="number" 
                     min="18" 
@@ -2876,13 +2977,28 @@ const MainApp = () => {
                     placeholder="18+"
                   />
                 </div>
-                <div className="space-y-2"><label className="text-[10px] font-black text-zinc-600 uppercase">Город</label>
-                  <select value={userData.city} onChange={e => setUserData({...userData, city: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 outline-none appearance-none cursor-pointer">
-                    {cities.map(c => <option key={c.name} value={c.name} className="bg-zinc-900">{c.name}</option>)}
-                  </select>
+                <div className="space-y-2"><label className="text-[10px] font-black text-zinc-600 uppercase">Город *</label>
+                  <div className="w-full bg-white/5 border border-white/10 rounded-2xl p-4">
+                    <SuggestAutocomplete
+                      value={userData.city || ''}
+                      onChange={(value) => setUserData({ ...userData, city: value, latitude: null, longitude: null })}
+                      onSelect={(suggestion) => {
+                        if (suggestion?.coords) {
+                          setUserData((prev) => ({
+                            ...prev,
+                            city: suggestion.text,
+                            latitude: suggestion.coords.latitude,
+                            longitude: suggestion.coords.longitude,
+                          }));
+                        }
+                      }}
+                      placeholder="Введите город"
+                      type="locality"
+                    />
+                  </div>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black text-zinc-600 uppercase">Пол</label>
+                  <label className="text-[10px] font-black text-zinc-600 uppercase">Пол *</label>
                   <select 
                     value={userData.gender || 'male'} 
                     onChange={e => setUserData({...userData, gender: e.target.value})} 
@@ -2981,9 +3097,12 @@ const MainApp = () => {
               <button 
                 onClick={async () => {
                   try {
-                    const { error } = await supabase
-                      .from('users')
-                      .update({
+                    if (!isRequiredProfileFilled(userData)) {
+                      alert('Заполните обязательные поля: Имя, Возраст 18+, Город и Пол');
+                      return;
+                    }
+
+                    await apiClient.updateProfile({
                         name: userData.name || null,
                         age: userData.age || null,
                         city: userData.city,
@@ -2995,16 +3114,15 @@ const MainApp = () => {
                         music: userData.music,
                         equip: userData.equip,
                         goal: userData.goal,
+                        latitude: userData.latitude ?? null,
+                        longitude: userData.longitude ?? null,
                         interests: [
                             { id: 'style', label: 'Стиль', value: userData.temp || 'Спокойный', icon: 'Gauge' },
                             { id: 'music', label: 'Музыка', value: userData.music || 'Рок', icon: 'Music' },
                             { id: 'equip', label: 'Экип', value: userData.equip || 'Только шлем', icon: 'Shield' },
                             { id: 'goal', label: 'Цель', value: userData.goal || 'Только поездки', icon: 'Target' }
                         ]
-                      })
-                      .eq('id', userData.id);
-
-                    if (error) throw error;
+                    });
                     
                     alert('Профиль успешно сохранен!');
                     setShowSettings(false);
@@ -3014,16 +3132,20 @@ const MainApp = () => {
                         setCurrentIndex(0);
                     }
                     
-                    // Reload users to reflect changes if needed
-                    if (window.supabaseManager && window.supabaseManager.loadUsers) {
-                        window.supabaseManager.loadUsers();
+                    // Reload data once after explicit save (safe: dismissed cards stay hidden).
+                    if (window.apiManager?.loadUsers) {
+                      window.apiManager.loadUsers();
+                    }
+                    if (window.apiManager?.loadEvents) {
+                      window.apiManager.loadEvents();
                     }
                   } catch (err) {
                     console.error('Error saving profile:', err);
                     alert('Ошибка при сохранении профиля: ' + err.message);
                   }
                 }} 
-                className="w-full bg-orange-600 p-5 rounded-[24px] font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all"
+                disabled={profileSaveDisabled}
+                className="w-full bg-orange-600 disabled:bg-orange-600/40 disabled:cursor-not-allowed p-5 rounded-[24px] font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all"
               >
                 Сохранить
               </button>
@@ -3044,7 +3166,7 @@ const MainApp = () => {
                  <div className="p-6 bg-white/5 rounded-[24px] border border-white/10 space-y-4">
                    <h3 className="text-sm font-black uppercase tracking-widest text-zinc-500">Аккаунт</h3>
                    <div className="space-y-2">
-                     <label className="text-[10px] font-black text-zinc-600 uppercase">Email</label>
+                     <label className="text-[10px] font-black text-zinc-600 uppercase">Почта</label>
                      {isEditingEmail ? (
                         <div className="space-y-2">
                             <input 
@@ -3054,8 +3176,15 @@ const MainApp = () => {
                                placeholder="Новый email"
                                className="w-full bg-white/10 border border-white/20 rounded-xl p-3 text-sm outline-none text-white focus:border-orange-500" 
                             />
+                            <input
+                               type="password"
+                               value={emailCurrentPassword}
+                               onChange={(e) => setEmailCurrentPassword(e.target.value)}
+                               placeholder="Текущий пароль"
+                               className="w-full bg-white/10 border border-white/20 rounded-xl p-3 text-sm outline-none text-white focus:border-orange-500"
+                            />
                             <div className="flex gap-2">
-                                <button onClick={handleEmailUpdate} className="flex-1 bg-orange-600 py-2 rounded-xl text-xs font-bold uppercase">Сохранить</button>
+                                <button disabled={isUpdatingEmail} onClick={handleEmailUpdate} className="flex-1 bg-orange-600 disabled:bg-orange-600/40 py-2 rounded-xl text-xs font-bold uppercase">{isUpdatingEmail ? 'Сохранение...' : 'Сохранить'}</button>
                                 <button onClick={() => setIsEditingEmail(false)} className="flex-1 bg-white/10 py-2 rounded-xl text-xs font-bold uppercase">Отмена</button>
                             </div>
                         </div>
@@ -3076,6 +3205,13 @@ const MainApp = () => {
                      <label className="text-[10px] font-black text-zinc-600 uppercase">Пароль</label>
                      {isEditingPassword ? (
                         <div className="space-y-2">
+                            <input
+                               type="password"
+                               value={passwordCurrentPassword}
+                               onChange={(e) => setPasswordCurrentPassword(e.target.value)}
+                               placeholder="Текущий пароль"
+                               className="w-full bg-white/10 border border-white/20 rounded-xl p-3 text-sm outline-none text-white focus:border-orange-500"
+                            />
                             <input 
                                type="password" 
                                value={newPassword} 
@@ -3084,7 +3220,7 @@ const MainApp = () => {
                                className="w-full bg-white/10 border border-white/20 rounded-xl p-3 text-sm outline-none text-white focus:border-orange-500" 
                             />
                             <div className="flex gap-2">
-                                <button onClick={handlePasswordUpdate} className="flex-1 bg-orange-600 py-2 rounded-xl text-xs font-bold uppercase">Сохранить</button>
+                                <button disabled={isUpdatingPassword} onClick={handlePasswordUpdate} className="flex-1 bg-orange-600 disabled:bg-orange-600/40 py-2 rounded-xl text-xs font-bold uppercase">{isUpdatingPassword ? 'Сохранение...' : 'Сохранить'}</button>
                                 <button onClick={() => setIsEditingPassword(false)} className="flex-1 bg-white/10 py-2 rounded-xl text-xs font-bold uppercase">Отмена</button>
                             </div>
                         </div>
@@ -3097,11 +3233,37 @@ const MainApp = () => {
                    </div>
                  </div>
                  
+                 {/* GHOST MODE */}
+                 <div className="p-6 bg-white/5 rounded-[24px] border border-white/10 space-y-4">
+                   <h3 className="text-sm font-black uppercase tracking-widest text-zinc-500">Приватность</h3>
+                   <div className="flex items-center justify-between">
+                     <div>
+                       <div className="font-bold text-white text-sm">Режим инкогнито</div>
+                       <div className="text-[10px] text-zinc-500 mt-1">Скрыть мое местоположение на карте</div>
+                     </div>
+                     <button
+                       onClick={() => {
+                         const newValue = !userData?.is_private;
+                        // TEMP: local only, server save on profile "Сохранить" button.
+                        setUserData((prev) => ({ ...prev, is_private: newValue }));
+                       }}
+                      aria-pressed={Boolean(userData?.is_private)}
+                       className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors duration-200 ${
+                         userData?.is_private ? 'bg-orange-600' : 'bg-zinc-600'
+                       }`}
+                     >
+                       <span
+                        className={`absolute left-1 h-5 w-5 transform rounded-full bg-white transition-transform duration-200 shadow-sm ${
+                          userData?.is_private ? 'translate-x-5' : 'translate-x-0'
+                         }`}
+                       />
+                     </button>
+                   </div>
+                 </div>
 
-
-                 <button className="w-full bg-red-500/10 border border-red-500/20 p-6 rounded-[24px] flex items-center justify-center gap-2 text-red-500 font-black uppercase tracking-widest active:scale-95 transition-all">
+                 <button onClick={handleDeleteAccount} disabled={isLoggingOut} className="w-full bg-red-500/10 border border-red-500/20 p-6 rounded-[24px] flex items-center justify-center gap-2 text-red-500 disabled:opacity-50 font-black uppercase tracking-widest active:scale-95 transition-all">
                     <Trash2 size={20} />
-                    Удалить аккаунт
+                    {isLoggingOut ? 'Удаление...' : 'Удалить аккаунт'}
                  </button>
               </div>
             </div>
@@ -3183,10 +3345,20 @@ const MainApp = () => {
                 </div>
                 <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-2xl p-4">
                     <MapPinIcon size={18} className="text-zinc-400 flex-shrink-0" />
-                    <AddressAutocomplete
+                    <SuggestAutocomplete
                       value={newEvent.address}
-                      onChange={(value) => setNewEvent({...newEvent, address: value})}
+                      onChange={(value) => setNewEvent({...newEvent, address: value, latitude: null, longitude: null})}
+                      onSelect={(suggestion) => {
+                        setNewEvent((prev) => ({
+                          ...prev,
+                          address: suggestion.text,
+                          latitude: suggestion.coords?.latitude ?? null,
+                          longitude: suggestion.coords?.longitude ?? null,
+                        }));
+                      }}
                       placeholder="Место встречи"
+                      userCity={userData?.city || ''}
+                      type="geo"
                     />
                   </div>
                 <div>
@@ -3211,7 +3383,25 @@ const MainApp = () => {
         )}
 
         {/* VIEW PROFILE MODAL */}
-        {viewingProfile && (
+        {viewingProfileLoading && (
+          <div className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center animate-in fade-in duration-200">
+            <div className="w-full max-w-md h-full bg-black relative flex flex-col shadow-2xl overflow-hidden sm:rounded-[32px] sm:h-[90vh] sm:border sm:border-white/10">
+              <div className="flex items-center gap-4 mb-4 p-4 shrink-0 z-10">
+                <div className="w-10 h-10 rounded-xl bg-white/5 animate-pulse" />
+                <div className="h-5 w-28 bg-white/5 rounded-lg animate-pulse" />
+              </div>
+              <div className="flex-1 overflow-y-auto pb-20 scrollbar-hide px-4">
+                <div className="relative aspect-[3/4] overflow-hidden mb-4 rounded-[24px] bg-white/5 animate-pulse" />
+                <div className="space-y-3">
+                  <div className="h-6 w-2/3 bg-white/5 rounded-lg animate-pulse" />
+                  <div className="h-4 w-1/2 bg-white/5 rounded-lg animate-pulse" />
+                  <div className="h-20 w-full bg-white/5 rounded-[24px] animate-pulse" />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        {viewingProfile && !viewingProfileLoading && (
           <div className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center animate-in fade-in duration-200">
              <div className="w-full max-w-md h-full bg-black relative flex flex-col shadow-2xl overflow-hidden animate-in slide-in-from-right duration-300 sm:rounded-[32px] sm:h-[90vh] sm:border sm:border-white/10">
                 <div className="flex items-center gap-4 mb-4 p-4 shrink-0 z-10">
@@ -3282,19 +3472,29 @@ const MainApp = () => {
         )}
       </main>
 
-      <nav className="h-24 shrink-0 flex items-start justify-center px-4 relative z-50">
+      <nav className="h-24 shrink-0 flex items-start justify-center px-4 relative z-40">
         <div className="w-full max-w-sm h-16 bg-[#1c1c1e]/90 backdrop-blur-3xl border border-white/10 rounded-[32px] flex items-center justify-around shadow-2xl">
               <button onClick={() => {
+                if (shouldEnforceProfileLock) {
+                  setActiveTab('profile');
+                  setShowWelcomeModal(true);
+                  return;
+                }
                 setActiveTab('search'); 
                 setSelectedChat(null); 
                 setMatchData(null); 
                 setSwipedChatId(null); 
                 setShowSettings(false); 
                 setShowAppSettings(false); 
-                setNewEvent({ title: '', description: '', date: '', time: '', address: '', link: '' });
+                setNewEvent({ title: '', description: '', date: '', time: '', address: '', link: '', latitude: null, longitude: null });
                 setShowEventModal(false);
               }} className={`flex flex-col items-center gap-1 transition-colors active:scale-95 ${activeTab === 'search' ? 'text-orange-500' : 'text-zinc-600'}`}><Search size={22}/><span className="text-[9px] font-black uppercase">Поиск</span></button>
           <button onClick={() => {
+                if (shouldEnforceProfileLock) {
+                  setActiveTab('profile');
+                  setShowWelcomeModal(true);
+                  return;
+                }
                 setActiveTab('map'); 
                 setSelectedChat(null); 
                 setMatchData(null); 
@@ -3304,6 +3504,11 @@ const MainApp = () => {
                 setShowEventModal(false);
               }} className={`flex flex-col items-center gap-1 transition-colors active:scale-95 ${activeTab === 'map' ? 'text-orange-500' : 'text-zinc-600'}`}><MapPin size={22}/><span className="text-[9px] font-black uppercase">Карта</span></button>
           <button onClick={() => {
+                if (shouldEnforceProfileLock) {
+                  setActiveTab('profile');
+                  setShowWelcomeModal(true);
+                  return;
+                }
                 setActiveTab('chats'); 
                 setSelectedChat(null); 
                 setMatchData(null); 
@@ -3335,14 +3540,22 @@ const MainApp = () => {
           {/* Backdrop */}
           <div 
             className="absolute inset-0 bg-black/80 backdrop-blur-md"
-            onClick={() => setShowWelcomeModal(false)}
+            onClick={() => {
+              if (profileCompleted) {
+                setShowWelcomeModal(false);
+              }
+            }}
           />
           
           {/* Modal */}
           <div className="relative w-full max-w-md bg-[#1c1c1e] border border-white/10 rounded-[32px] shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200">
             {/* Close button */}
             <button 
-              onClick={() => setShowWelcomeModal(false)}
+              onClick={() => {
+                if (profileCompleted) {
+                  setShowWelcomeModal(false);
+                }
+              }}
               className="absolute top-4 right-4 p-2 text-zinc-400 hover:text-white hover:bg-white/10 rounded-full transition-all z-10"
             >
               <X size={20} />
@@ -3380,14 +3593,16 @@ const MainApp = () => {
               
               <button 
                 onClick={() => {
-                  setShowWelcomeModal(false);
                   setActiveTab('profile');
                   setTimeout(() => {
-                    // Имитируем клик на кнопку редактирования профиля
-                    const editButton = document.querySelector('[data-edit-profile="true"]');
-                    if (editButton) {
-                      editButton.click();
-                    }
+                    // Закрываем welcome modal и открываем настройки
+                    setShowWelcomeModal(false);
+                    setTimeout(() => {
+                      const editButton = document.querySelector('[data-edit-profile="true"]');
+                      if (editButton) {
+                        editButton.click();
+                      }
+                    }, 100);
                   }, 100);
                 }}
                 className="w-full bg-orange-600 hover:bg-orange-500 text-white font-bold py-4 rounded-2xl shadow-[0_20px_40px_-15px_rgba(234,88,12,0.3)] transition-all active:scale-[0.98] flex items-center justify-center gap-2"
@@ -3396,12 +3611,14 @@ const MainApp = () => {
                 <ArrowRight size={20} />
               </button>
               
-              <button 
-                onClick={() => setShowWelcomeModal(false)}
-                className="w-full text-zinc-500 hover:text-zinc-400 text-sm mt-4 transition-colors"
-              >
-                Позже
-              </button>
+              {profileCompleted && (
+                <button 
+                  onClick={() => setShowWelcomeModal(false)}
+                  className="w-full text-zinc-500 hover:text-zinc-400 text-sm mt-4 transition-colors"
+                >
+                  Позже
+                </button>
+              )}
             </div>
           </div>
         </div>

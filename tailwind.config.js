@@ -5,7 +5,16 @@ export default {
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
-    extend: {},
+    extend: {
+      zIndex: {
+        'tooltip': '10',
+        'dropdown': '20',
+        'drawer': '30',
+        'header': '40',
+        'modal': '50',
+        'toast': '60',
+      }
+    },
   },
   plugins: [],
 }

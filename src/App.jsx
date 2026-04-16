@@ -1,8 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import AuthModal from './components/AuthModal';
+import RegistrationModal from './components/RegistrationModal';
 import MainApp from './components/MainApp';
+import { Mail, Phone, MessageCircle, Send, FileText, ShieldCheck } from 'lucide-react';
 
-import { supabase } from './supabaseClient';
+import { apiClient } from './apiClient';
 
 function App() {
   // Определяем, запущено ли приложение как PWA
@@ -11,10 +13,12 @@ function App() {
                  document.referrer.includes('android-app://');
   
   // Состояния
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [showCookies, setShowCookies] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [userData, setUserData] = useState(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isRegistrationModalOpen, setIsRegistrationModalOpen] = useState(false);
+  const [showCookies, setShowCookies] = useState(false);
   const howItWorksRef = useRef(null);
   
   // Логика для открытия/закрытия окна
@@ -24,83 +28,104 @@ function App() {
     }
   };
 
+  // Handle successful login
+  const handleLogin = () => {
+    setIsLoggedIn(true);
+    setIsAuthModalOpen(false);
+    setIsRegistrationModalOpen(false);
+  };
+
+  // Handle successful registration
+  const handleRegister = () => {
+    setIsLoggedIn(true);
+    setIsRegistrationModalOpen(false);
+    setIsAuthModalOpen(false);
+  };
+
+  // Open registration modal
+  const openRegistrationModal = () => {
+    setIsRegistrationModalOpen(true);
+    setIsAuthModalOpen(false);
+  };
+
+  // Open login modal
+  const openLoginModal = () => {
+    setIsAuthModalOpen(true);
+    setIsRegistrationModalOpen(false);
+  };
+
   useEffect(() => {
+    // Очистка старых ключей Supabase и инициализация для локальных тестов
+    const cleanLegacyStorage = () => {
+      const legacyKeys = [
+        'supabase.auth.token', 
+        'sb-ikztmdltejodcgxgwzbq-auth-token',
+        'supabase.auth.expires_at',
+        'userEmail'
+      ];
+      legacyKeys.forEach(key => localStorage.removeItem(key));
+      
+      // Локальный мок‑логин отключён: в MVP используем реальную сессию (Яндекс ID → JWT).
+    };
+    cleanLegacyStorage();
+
     let mounted = true;
     
     // Проверяем сессии асинхронно, но быстро
     const checkSession = async () => {
       try {
-        // Сначала проверяем localStorage (быстро)
-        const storedUserId = localStorage.getItem('userId');
-        const storedSession = localStorage.getItem('supabase.auth.token');
+        // Check token in localStorage
+        const token = localStorage.getItem('motomate_token');
+        const userId = localStorage.getItem('userId');
+        const storedUserData = localStorage.getItem('userData');
         
-        if (storedUserId && storedSession) {
-          // Если есть данные в localStorage, сразу показываем приложение
-          if (mounted) {
-            setIsLoggedIn(true);
-            setIsLoading(false);
-          }
+        if (token && userId) {
+          // Быстрый вход по мок‑токену отключён для MVP/прода
           
-          // Затем проверяем валидность сессии в фоне
-          const { data: { session } } = await supabase.auth.getSession();
-          if (!session && mounted) {
-            // Если сессия невалидна, показываем лендинг
-            setIsLoggedIn(false);
-            // НЕ открываем модалку автоматически для веб-версии
-            if (isPWA) {
-              setIsAuthModalOpen(true);
-            }
-          }
-        } else {
-          // Если нет данных в localStorage, проверяем сессию
-          const { data: { session } } = await supabase.auth.getSession();
-          if (mounted) {
-            if (session) {
+          // For real auth, verify profile via API
+          try {
+            const profile = await apiClient.getProfile();
+            if (mounted) {
+              setUserData(profile);
               setIsLoggedIn(true);
-              localStorage.setItem('userId', session.user.id);
-            } else {
+            }
+          } catch (error) {
+            console.error('Profile fetch failed:', error);
+            // Token is invalid, remove it
+            localStorage.removeItem('motomate_token');
+            localStorage.removeItem('userId');
+            localStorage.removeItem('userData');
+            if (mounted) {
               setIsLoggedIn(false);
-              // НЕ открываем модалку автоматически для веб-версии
               if (isPWA) {
                 setIsAuthModalOpen(true);
               }
             }
-            setIsLoading(false);
           }
+        } else {
+          // No token, show auth modal
+          if (mounted) {
+            setIsLoggedIn(false);
+            if (isPWA) {
+              setIsAuthModalOpen(true);
+            }
+          }
+        }
+        
+        if (mounted) {
+          setIsLoading(false);
         }
       } catch (error) {
         console.error('Session check error:', error);
         if (mounted) {
           setIsLoading(false);
-          // НЕ открываем модалку автоматически для веб-версии
+          setIsLoggedIn(false);
           if (isPWA) {
             setIsAuthModalOpen(true);
           }
         }
       }
     };
-
-    // Подписка на изменения сессии
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (mounted) {
-        if (session) {
-          setIsLoggedIn(true);
-          localStorage.setItem('userId', session.user.id);
-        } else {
-          setIsLoggedIn(false);
-          localStorage.removeItem('userId');
-          localStorage.removeItem('supabase.auth.token');
-          localStorage.removeItem('supabase.auth.refreshToken');
-          localStorage.removeItem('userImages');
-          // НЕ открываем модалку автоматически для веб-версии
-          if (isPWA) {
-            setIsAuthModalOpen(true);
-          }
-        }
-      }
-    });
 
     // Проверка cookies
     const cookiesAccepted = localStorage.getItem('cookiesAccepted');
@@ -113,7 +138,6 @@ function App() {
 
     return () => {
       mounted = false;
-      subscription.unsubscribe();
     };
   }, [isPWA]);
 
@@ -327,63 +351,109 @@ function App() {
             </section>
           </main>
 
-          {/* Контакты */}
-          <section className="mt-32 py-20 border-t border-white/5">
-            <div className="max-w-6xl mx-auto px-6">
-              <h2 className="text-3xl md:text-4xl font-black italic uppercase tracking-tight text-center mb-12">
-                <span className="text-orange-500">Свяжись</span> с нами
+          {/* Контакты + Футер */}
+          <section className="mt-32 py-20 border-t border-white/5 bg-[#000000]">
+            <div className="max-w-6xl mx-auto px-6 space-y-10">
+              <h2 className="text-3xl md:text-4xl font-black italic uppercase tracking-tight text-center">
+                <span className="text-orange-500">Связь</span> и поддержка
               </h2>
-              <div className="grid md:grid-cols-3 gap-8 text-center">
-                <div>
-                  <h3 className="text-lg font-bold uppercase italic mb-4">Email</h3>
-                  <a href="mailto:info@motoznakomstva.ru" className="text-zinc-400 hover:text-orange-500 transition-colors">
-                    info@motoznakomstva.ru
-                  </a>
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold uppercase italic mb-4">Телефон</h3>
-                  <a href="tel:+79991234567" className="text-zinc-400 hover:text-orange-500 transition-colors">
-                    +7 (999) 123-45-67
-                  </a>
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold uppercase italic mb-4">Соцсети</h3>
-                  <div className="flex justify-center gap-4">
-                    <a href="#" className="text-zinc-400 hover:text-orange-500 transition-colors">VK</a>
-                    <a href="#" className="text-zinc-400 hover:text-orange-500 transition-colors">TG</a>
-                    <a href="#" className="text-zinc-400 hover:text-orange-500 transition-colors">IG</a>
+
+              <div className="backdrop-blur-lg bg-white/5 border border-white/10 rounded-[28px] p-8 md:p-10">
+                <div className="grid md:grid-cols-3 gap-10">
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2 text-white font-bold uppercase tracking-wide text-sm">
+                      <Mail size={16} className="text-orange-500" />
+                      <span>Почта</span>
+                    </div>
+                    <a
+                      href="mailto:info@motoznakomstva.ru"
+                      className="text-zinc-300 hover:text-[#f97315] transition-colors duration-300"
+                    >
+                      info@motoznakomstva.ru
+                    </a>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2 text-white font-bold uppercase tracking-wide text-sm">
+                      <Phone size={16} className="text-orange-500" />
+                      <span>Телефон</span>
+                    </div>
+                    <a
+                      href="tel:+79991234567"
+                      className="text-zinc-300 hover:text-[#f97315] transition-colors duration-300"
+                    >
+                      +7 (999) 123-45-67
+                    </a>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2 text-white font-bold uppercase tracking-wide text-sm">
+                      <MessageCircle size={16} className="text-orange-500" />
+                      <span>Соцсети</span>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <a
+                        href="#"
+                        aria-label="VK"
+                        className="w-10 h-10 rounded-full bg-white/5 border border-white/10 text-zinc-300 hover:text-[#f97315] hover:border-[#f97315]/40 transition-all duration-300 flex items-center justify-center"
+                      >
+                        <MessageCircle size={18} />
+                      </a>
+                      <a
+                        href="#"
+                        aria-label="Telegram"
+                        className="w-10 h-10 rounded-full bg-white/5 border border-white/10 text-zinc-300 hover:text-[#f97315] hover:border-[#f97315]/40 transition-all duration-300 flex items-center justify-center"
+                      >
+                        <Send size={18} />
+                      </a>
+                    </div>
                   </div>
                 </div>
               </div>
+
+              <footer className="pt-6 border-t border-white/10 space-y-3">
+                <div className="text-xs text-gray-500 text-center">
+                  © 2026 Мотознакомства
+                </div>
+                <div className="flex items-center justify-center gap-6 text-xs text-gray-500">
+                  <a href="#" className="inline-flex items-center gap-1.5 hover:text-[#f97315] transition-colors duration-300">
+                    <ShieldCheck size={13} />
+                    <span>Политика</span>
+                  </a>
+                  <a href="#" className="inline-flex items-center gap-1.5 hover:text-[#f97315] transition-colors duration-300">
+                    <FileText size={13} />
+                    <span>Соглашение</span>
+                  </a>
+                </div>
+                <div className="text-xs text-gray-500 text-center">
+                  ИП Фамилия И.О., ОГРНИП: 000000000000000, ИНН: 000000000000.
+                </div>
+              </footer>
             </div>
           </section>
-
-          {/* Футер */}
-          <footer className="py-12 border-t border-white/5">
-            <div className="max-w-6xl mx-auto px-6">
-              <div className="flex flex-col md:flex-row justify-between items-center gap-6">
-                <div className="text-zinc-600 text-xs tracking-widest uppercase">
-                  &copy; 2026 МОТОЗНАКОМСТВА
-                </div>
-                <div className="flex gap-6 text-xs">
-                  <a href="#" className="text-zinc-500 hover:text-orange-500 transition-colors">Политика конфиденциальности</a>
-                  <a href="#" className="text-zinc-500 hover:text-orange-500 transition-colors">Пользовательское соглашение</a>
-                </div>
-              </div>
-            </div>
-          </footer>
         </div>
       )}
 
       {/* Модальное окно авторизации (поверх всего в PWA) */}
-      <div className={`fixed inset-0 z-50 ${isPWA && isAuthModalOpen ? 'block' : isAuthModalOpen ? 'block' : 'hidden'}`}>
+      {isAuthModalOpen && (
         <AuthModal 
           isOpen={isAuthModalOpen} 
           onClose={handleModalClose} 
-          onLogin={() => setIsLoggedIn(true)} 
+          onLogin={handleLogin}
+          onRegister={openRegistrationModal}
           isPWA={isPWA}
         />
-      </div>
+      )}
+
+      {/* Registration Modal */}
+      {isRegistrationModalOpen && (
+        <RegistrationModal 
+          isOpen={isRegistrationModalOpen} 
+          onClose={() => setIsRegistrationModalOpen(false)}
+          onRegister={handleRegister}
+          isPWA={isPWA}
+        />
+      )}
 
       {/* Куки окно */}
       {showCookies && (
