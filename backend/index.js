@@ -1413,7 +1413,7 @@ router.get('/geo/suggest', async (req, res) => {
     }).filter((item) => item.text);
 
     console.log('[geo/suggest] Normalized results:', results.length);
-    res.json(results);
+    res.json({ results });
 
   } catch (error) {
     console.error('[geo/suggest] ОШИБКА ГЕО-ПРОКСИ:', error.message);
