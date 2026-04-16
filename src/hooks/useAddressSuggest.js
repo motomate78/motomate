@@ -65,7 +65,7 @@ export function useAddressSuggest(yandexMapsKey) {
     } finally {
       setLoading(false);
     }
-  }, [yandexMapsKey]);
+  }, []);
 
   const geocodeAddress = useCallback(async (address, city = '') => {
     try {

@@ -3017,7 +3017,6 @@ const MainApp = () => {
                         value={userData.city || ''}
                         onChange={(value) => setUserData({ ...userData, city: value, latitude: null, longitude: null })}
                         placeholder="Введите город"
-                        yandexMapsKey={yandexApiKey}
                       />
                     </div>
                     <button
@@ -3386,7 +3385,6 @@ const MainApp = () => {
                         }));
                       }}
                       city={userData?.city || ''}
-                      yandexMapsKey={yandexApiKey}
                       placeholder="Адрес события..."
                     />
                   </div>

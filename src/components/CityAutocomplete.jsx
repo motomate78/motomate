@@ -58,9 +58,9 @@ export function CityAutocomplete({ value, onChange, placeholder = 'Введи с
       return;
     }
 
+    setIsOpen(true); // Открываем dropdown при печати
     debounceTimeoutRef.current = setTimeout(() => {
       fetchCities(text);
-      setIsOpen(true);
     }, 300);
   };
 

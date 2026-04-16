@@ -8,7 +8,6 @@ export function AddressAutocomplete({
   value,
   onChange,
   city = '',
-  yandexMapsKey = import.meta.env.VITE_YANDEX_API_KEY,
   placeholder = 'Адрес события...'
 }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -17,7 +16,7 @@ export function AddressAutocomplete({
   const dropdownRef = useRef(null);
   const debounceTimerRef = useRef(null);
 
-  const { suggestions, loading, searchAddresses, geocodeAddress } = useAddressSuggest(yandexMapsKey);
+  const { suggestions, loading, searchAddresses, geocodeAddress } = useAddressSuggest();
 
   const handleInputChange = (e) => {
     const text = e.target.value;
