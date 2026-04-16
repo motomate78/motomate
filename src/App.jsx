@@ -6,12 +6,27 @@ import { Mail, Phone, MessageCircle, Send, FileText, ShieldCheck } from 'lucide-
 
 import { apiClient } from './apiClient';
 
+// Обработка ChunkLoadError для принудительной перезагрузки
+window.addEventListener('error', (event) => {
+  if (event.message && event.message.includes('Loading chunk')) {
+    console.warn('Chunk load error detected, forcing reload');
+    window.location.reload(true);
+  }
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  if (event.reason && event.reason.message && event.reason.message.includes('Loading chunk')) {
+    console.warn('Chunk load error in promise, forcing reload');
+    window.location.reload(true);
+  }
+});
+
 function App() {
   // Определяем, запущено ли приложение как PWA
-  const isPWA = window.matchMedia('(display-mode: standalone)').matches || 
-                 window.navigator.standalone || 
+  const isPWA = window.matchMedia('(display-mode: standalone)').matches ||
+                 window.navigator.standalone ||
                  document.referrer.includes('android-app://');
-  
+
   // Состояния
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isLoading, setIsLoading] = useState(true);

@@ -73,7 +73,7 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_YANDEX_API_KEY: "${VITE_YANDEX_API_KEY}"
-        VITE_API_URL: "${VITE_API_URL:-http://localhost:3001}"
+        VITE_API_URL: "${VITE_API_URL:-/api}"
     container_name: motomate-frontend
     restart: unless-stopped
     ports:
