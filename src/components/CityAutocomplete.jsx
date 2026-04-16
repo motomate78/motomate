@@ -20,37 +20,45 @@ export function CityAutocomplete({ value, onChange, placeholder = 'Введи с
 
     setLoading(true);
     try {
+      let results = [];
       const apiKey = String(yandexMapsKey || import.meta.env.VITE_YANDEX_API_KEY || '').trim();
-      if (!apiKey) {
-        setSuggestions([]);
-        setLoading(false);
-        return;
+      if (apiKey) {
+        const response = await fetch(
+          `https://geocode-maps.yandex.ru/1.x/?apikey=${apiKey}&geocode=${encodeURIComponent(query)}&kind=locality&results=8&format=json&lang=ru_RU`
+        );
+
+        if (response.ok) {
+          const data = await response.json();
+          const featureMembers = data?.response?.GeoObjectCollection?.featureMember || [];
+          results = featureMembers
+            .map((item) => {
+              const meta = item?.GeoObject?.metaDataProperty?.GeocoderMetaData;
+              const locality = meta?.Address?.Components?.find((component) => component.kind === 'locality')?.name;
+              const administrative = meta?.Address?.Components?.find((component) => component.kind === 'province')?.name;
+              const fallbackText = item?.GeoObject?.name || meta?.text || '';
+              return locality || administrative || fallbackText;
+            })
+            .map((city) => String(city || '').split(',')[0].trim())
+            .filter(Boolean)
+            .filter((city, idx, arr) => arr.indexOf(city) === idx)
+            .slice(0, 8);
+        }
       }
 
-      const response = await fetch(
-        `https://geocode-maps.yandex.ru/1.x/?apikey=${apiKey}&geocode=${encodeURIComponent(query)}&kind=locality&results=8&format=json&lang=ru_RU`
-      );
-
-      if (!response.ok) {
-        setSuggestions([]);
-        setLoading(false);
-        return;
+      if (results.length === 0) {
+        const osmResponse = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&addressdetails=1&accept-language=ru&q=${encodeURIComponent(query)}`
+        );
+        if (osmResponse.ok) {
+          const osmData = await osmResponse.json();
+          results = (Array.isArray(osmData) ? osmData : [])
+            .map((item) => item?.address?.city || item?.address?.town || item?.address?.village || item?.address?.state || item?.name || item?.display_name)
+            .map((city) => String(city || '').split(',')[0].trim())
+            .filter(Boolean)
+            .filter((city, idx, arr) => arr.indexOf(city) === idx)
+            .slice(0, 8);
+        }
       }
-
-      const data = await response.json();
-      const featureMembers = data?.response?.GeoObjectCollection?.featureMember || [];
-      const results = featureMembers
-        .map((item) => {
-          const meta = item?.GeoObject?.metaDataProperty?.GeocoderMetaData;
-          const locality = meta?.Address?.Components?.find((component) => component.kind === 'locality')?.name;
-          const administrative = meta?.Address?.Components?.find((component) => component.kind === 'province')?.name;
-          const fallbackText = item?.GeoObject?.name || meta?.text || '';
-          return locality || administrative || fallbackText;
-        })
-        .map((city) => String(city || '').split(',')[0].trim())
-        .filter(Boolean)
-        .filter((city, idx, arr) => arr.indexOf(city) === idx) // Remove duplicates
-        .slice(0, 8);
 
       setSuggestions(results);
     } catch (error) {

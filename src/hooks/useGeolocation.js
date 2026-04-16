@@ -13,42 +13,49 @@ export function useGeolocation(yandexMapsKey, autoRequest = false) {
   const [error, setError] = useState(null);
 
   const getCity = async (lat, lon) => {
+    let cityName = '';
     try {
-      // Используем Яндекс.Геокодер для обратного геокодинга
-      const response = await fetch(
-        `https://geocode-maps.yandex.ru/1.x/?apikey=${yandexMapsKey}&geocode=${lon},${lat}&format=json`
-      );
-      
-      if (!response.ok) throw new Error('Geocoding failed');
-      
-      const data = await response.json();
-      const featureMember = data.response.GeoObjectCollection.featureMember[0];
-      
-      if (featureMember) {
-        const addressDetails = featureMember.GeoObject.metaDataProperty.GeocoderMetaData.AddressDetails;
-        
-        // Пытаемся найти город
-        let cityName = '';
-        
-        // Проверяем иерархию: Страна -> Адм.область -> Город -> Город/Область
-        if (addressDetails.Country.AdministrativeArea?.Locality?.LocalityName) {
-          cityName = addressDetails.Country.AdministrativeArea.Locality.LocalityName;
-        } else if (addressDetails.Country.AdministrativeArea?.LocalityName) {
-          cityName = addressDetails.Country.AdministrativeArea.LocalityName;
-        } else if (addressDetails.Country.Locality?.LocalityName) {
-          cityName = addressDetails.Country.Locality.LocalityName;
-        }
-        
-        if (cityName) {
-          setCity(cityName);
-          setCoordinates({ lat, lon });
-          setError(null);
-        } else {
-          setError('Город не определен');
+      if (yandexMapsKey) {
+        const response = await fetch(
+          `https://geocode-maps.yandex.ru/1.x/?apikey=${yandexMapsKey}&geocode=${lon},${lat}&format=json`
+        );
+        if (response.ok) {
+          const data = await response.json();
+          const featureMember = data?.response?.GeoObjectCollection?.featureMember?.[0];
+          const addressDetails = featureMember?.GeoObject?.metaDataProperty?.GeocoderMetaData?.AddressDetails;
+          if (addressDetails?.Country?.AdministrativeArea?.Locality?.LocalityName) {
+            cityName = addressDetails.Country.AdministrativeArea.Locality.LocalityName;
+          } else if (addressDetails?.Country?.AdministrativeArea?.LocalityName) {
+            cityName = addressDetails.Country.AdministrativeArea.LocalityName;
+          } else if (addressDetails?.Country?.Locality?.LocalityName) {
+            cityName = addressDetails.Country.Locality.LocalityName;
+          }
         }
       }
+
+      if (!cityName) {
+        const nominatimResponse = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&accept-language=ru`
+        );
+        if (nominatimResponse.ok) {
+          const nominatimData = await nominatimResponse.json();
+          cityName = nominatimData?.address?.city
+            || nominatimData?.address?.town
+            || nominatimData?.address?.village
+            || nominatimData?.address?.state
+            || '';
+        }
+      }
+
+      if (cityName) {
+        setCity(cityName);
+        setCoordinates({ lat, lon });
+        setError(null);
+      } else {
+        setError('Город не определен');
+      }
     } catch (err) {
-      console.error('Geocoding error:', err);
+      console.error('Geolocation city detect error:', err);
       setError('Ошибка определения города');
     } finally {
       setLoading(false);
