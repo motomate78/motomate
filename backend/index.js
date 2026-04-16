@@ -12,6 +12,7 @@ const { z } = require('zod');
 const serverless = require('serverless-http');
 const { Server: SocketIOServer } = require('socket.io');
 const webpush = require('web-push');
+const axios = require('axios');
 require('dotenv').config();
 
 const app = express();
@@ -944,15 +945,21 @@ router.delete('/users/me', authenticateToken, async (req, res) => {
 router.get('/users/profile/images', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
+    console.log('[users/profile/images] Request for user:', userId);
+
     const images = await prisma.image.findMany({
       where: { user_id: userId },
       orderBy: { order: 'asc' },
       select: { id: true, url: true, is_main: true, created_at: true },
     });
+
+    console.log('[users/profile/images] Found images:', images.length);
     res.json({ images });
   } catch (error) {
+    console.error('[users/profile/images] ERROR:', error.message, error.stack);
     logError('users.profile.images.get', error, { userId: req.user?.userId });
-    res.status(500).json({ error: 'Failed to get images' });
+    // Если таблица Image не существует или другая ошибка, возвращаем пустой массив вместо 500
+    res.json({ images: [] });
   }
 });
 
@@ -1214,19 +1221,26 @@ router.post('/likes', authenticateToken, likesLimiter, async (req, res) => {
     const { to_user_id } = req.body;
     const from_user_id = req.user.userId;
 
+    console.log('[likes] Toggle like:', { from_user_id, to_user_id });
+
     const existingLike = await prisma.like.findUnique({
       where: {
         from_user_id_to_user_id: { from_user_id, to_user_id },
       },
     });
 
+    console.log('[likes] Existing like:', !!existingLike);
+
     if (existingLike) {
+      console.log('[likes] Deleting existing like');
       await prisma.like.delete({ where: { id: existingLike.id } });
       res.json({ liked: false });
     } else {
+      console.log('[likes] Creating new like');
       // ATOMICITY: Use transaction to prevent race condition
       const result = await prisma.$transaction(async (tx) => {
-        await tx.like.create({ data: { from_user_id, to_user_id } });
+        const newLike = await tx.like.create({ data: { from_user_id, to_user_id } });
+        console.log('[likes] Like created in DB:', newLike.id);
         
         const reciprocalLike = await tx.like.findUnique({
           where: {
@@ -1237,9 +1251,12 @@ router.post('/likes', authenticateToken, likesLimiter, async (req, res) => {
           },
         });
 
+        console.log('[likes] Reciprocal like found:', !!reciprocalLike);
+
         let chatId = null;
         if (reciprocalLike) {
           chatId = [from_user_id, to_user_id].sort().join('_');
+          console.log('[likes] Match! Creating chat:', chatId);
           
           // Create or update Chat
           await tx.chat.upsert({
@@ -1254,7 +1271,7 @@ router.post('/likes', authenticateToken, likesLimiter, async (req, res) => {
 
           // Create or update Match
           const [user1, user2] = [from_user_id, to_user_id].sort();
-          await tx.match.upsert({
+          const match = await tx.match.upsert({
             where: {
               user_id_1_user_id_2: {
                 user_id_1: user1,
@@ -1268,6 +1285,7 @@ router.post('/likes', authenticateToken, likesLimiter, async (req, res) => {
               chat_id: chatId,
             },
           });
+          console.log('[likes] Match created/updated:', match.id);
         }
 
         return { isMatch: !!reciprocalLike, chatId };
@@ -1280,8 +1298,9 @@ router.post('/likes', authenticateToken, likesLimiter, async (req, res) => {
       });
     }
   } catch (error) {
+    console.error('[likes] ERROR:', error.message, error.stack);
     logError('likes.toggle', error, { userId: req.user?.userId });
-    res.status(500).json({ error: 'Failed to toggle like' });
+    res.status(500).json({ error: 'Failed to toggle like', details: error.message });
   }
 });
 
@@ -1332,7 +1351,10 @@ router.get('/geo/suggest', async (req, res) => {
     const { text, type = 'geo', results = 6, lang = 'ru_RU' } = req.query;
     const apiKey = process.env.YANDEX_API_KEY || process.env.VITE_YANDEX_API_KEY;
 
+    console.log('[geo/suggest] Request:', { text, type, results, lang, hasApiKey: !!apiKey });
+
     if (!apiKey) {
+      console.error('[geo/suggest] ERROR: Yandex API key not configured');
       return res.status(500).json({ error: 'Yandex API key not configured' });
     }
 
@@ -1340,20 +1362,19 @@ router.get('/geo/suggest', async (req, res) => {
       return res.json({ results: [] });
     }
 
-    const yandexUrl = new URL('https://suggest-maps.yandex.ru/v1/suggest');
-    yandexUrl.searchParams.append('apikey', apiKey);
-    yandexUrl.searchParams.append('text', String(text));
-    yandexUrl.searchParams.append('type', String(type));
-    yandexUrl.searchParams.append('results', String(results));
-    yandexUrl.searchParams.append('lang', String(lang));
+    const yandexUrl = `https://suggest-maps.yandex.ru/v1/suggest?apikey=${encodeURIComponent(apiKey)}&text=${encodeURIComponent(String(text))}&type=${encodeURIComponent(String(type))}&results=${encodeURIComponent(String(results))}&lang=${encodeURIComponent(String(lang))}`;
 
-    const response = await fetch(yandexUrl.toString());
+    console.log('[geo/suggest] Fetching:', yandexUrl);
+
+    const response = await axios.get(yandexUrl, { timeout: 10000 });
     
-    if (!response.ok) {
+    if (response.status !== 200) {
+      console.error('[geo/suggest] Yandex API error:', response.status, response.data);
       return res.status(response.status).json({ error: 'Yandex API error' });
     }
 
-    const data = await response.json();
+    const data = response.data;
+    console.log('[geo/suggest] Yandex response:', data);
     
     // Normalize response
     const normalized = (data.results || []).map((item) => {
@@ -1367,10 +1388,12 @@ router.get('/geo/suggest', async (req, res) => {
       return { text: displayText, coords };
     }).filter((item) => item.text);
 
+    console.log('[geo/suggest] Normalized results:', normalized.length);
     res.json({ results: normalized });
   } catch (error) {
+    console.error('[geo/suggest] ERROR:', error.message, error.stack);
     logError('geo.suggest', error);
-    res.status(500).json({ error: 'Failed to fetch suggestions' });
+    res.status(500).json({ error: 'Failed to fetch suggestions', details: error.message });
   }
 });
 

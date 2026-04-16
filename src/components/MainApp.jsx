@@ -2857,7 +2857,7 @@ const MainApp = () => {
             {/* ГАЛЕРЕЯ ФОТО */}
             <div className="w-full mb-6">
                 <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500 mb-4 ml-1">Галерея</h3>
-                <div className="grid grid-cols-3 gap-3 w-full">
+                <div className="grid grid-cols-6 gap-2 w-full">
                   {userImages.map((img, idx) => {
                     const isMainPhoto = userData?.image === img;
                     return (
