@@ -20,30 +20,24 @@ export function useAddressSuggest(yandexMapsKey) {
     setError(null);
 
     try {
-      let addresses = [];
       // Формируем поисковый запрос с городом если указан
       const searchQuery = city ? `${city}, ${query}` : query;
       
-      if (yandexMapsKey) {
-        const response = await fetch(
-          `https://suggest-maps.yandex.ru/v1/suggest?apikey=${yandexMapsKey}&text=${encodeURIComponent(searchQuery)}&type=geo&results=8&lang=ru_RU`,
-          {
-            headers: {
-              'Content-Type': 'application/json',
-            },
-          }
-        );
+      // Используем бэкенд прокси /api/geo/suggest (избегаем CORS)
+      const response = await fetch(
+        `/api/geo/suggest?text=${encodeURIComponent(searchQuery)}&type=geo&results=8&lang=ru_RU`
+      );
 
-        if (response.ok) {
-          const data = await response.json();
-          if (data.results && Array.isArray(data.results)) {
-            addresses = data.results.map((item) => ({
-              title: item.title?.text || '',
-              subtitle: item.subtitle ? item.subtitle.text : '',
-              fullAddress: (item.title?.text || '') + (item.subtitle ? `, ${item.subtitle.text}` : ''),
-              type: item.type || 'geo',
-            })).filter((item) => item.title);
-          }
+      let addresses = [];
+      if (response.ok) {
+        const data = await response.json();
+        if (data.results && Array.isArray(data.results)) {
+          addresses = data.results.map((item) => ({
+            title: item.text ? item.text.split(', ')[0] : '',
+            subtitle: item.text ? item.text.split(', ').slice(1).join(', ') : '',
+            fullAddress: item.text || '',
+            type: 'geo',
+          })).filter((item) => item.title);
         }
       }
 

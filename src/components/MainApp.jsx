@@ -29,7 +29,6 @@ const SuggestAutocomplete = ({ value, onChange, onSelect, placeholder, userCity 
   const inputRef = useRef(null);
   const debounceTimeoutRef = useRef(null);
   const yandexApiKey = String(import.meta.env.VITE_YANDEX_API_KEY || '').trim();
-  const suggestEnabled = yandexApiKey.length > 0;
 
   const fetchSuggestions = useCallback(async (query) => {
     if (!query || query.length < 2) {
@@ -39,14 +38,10 @@ const SuggestAutocomplete = ({ value, onChange, onSelect, placeholder, userCity 
 
     setLoading(true);
     try {
-      if (!suggestEnabled) {
-        setSuggestions([]);
-        return;
-      }
-
       const searchText = userCity ? `${userCity}, ${query}` : query;
+      // Используем бэкенд прокси /api/geo/suggest (избегаем CORS)
       const response = await fetch(
-        `https://suggest-maps.yandex.ru/v1/suggest?apikey=${yandexApiKey}&text=${encodeURIComponent(searchText)}&type=${encodeURIComponent(type)}&results=6&lang=ru_RU`
+        `/api/geo/suggest?text=${encodeURIComponent(searchText)}&type=${encodeURIComponent(type)}&results=6&lang=ru_RU`
       );
 
       if (!response.ok) {
@@ -56,16 +51,8 @@ const SuggestAutocomplete = ({ value, onChange, onSelect, placeholder, userCity 
 
       const data = await response.json();
       const normalized = (data.results || []).map((item) => {
-        const title = item.title?.text || item.title || '';
-        const subtitle = item.subtitle?.text || item.subtitle || '';
-        const displayText = [title, subtitle].filter(Boolean).join(', ') || item.text || '';
-        const point = item?.tags?.point || item?.point;
-        const coords = point && typeof point === 'object'
-          ? {
-              latitude: Number(point.lat),
-              longitude: Number(point.lon),
-            }
-          : null;
+        const displayText = item.text || '';
+        const coords = item.coords || null;
         return { text: displayText, coords };
       }).filter((item) => item.text);
 
@@ -76,7 +63,7 @@ const SuggestAutocomplete = ({ value, onChange, onSelect, placeholder, userCity 
     } finally {
       setLoading(false);
     }
-  }, [suggestEnabled, type, userCity, yandexApiKey]);
+  }, [type, userCity]);
 
   const handleInputChange = (e) => {
     const newValue = e.target.value;
