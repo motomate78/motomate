@@ -770,6 +770,9 @@ router.get('/users/:id', authenticateToken, async (req, res) => {
 
 router.put('/users/profile', authenticateToken, async (req, res) => {
   try {
+    console.log('[users/profile] UPDATE request for user:', req.user.userId);
+    console.log('[users/profile] Request body keys:', Object.keys(req.body || {}));
+
     const existingUser = await prisma.user.findUnique({
       where: { id: req.user.userId },
       select: { image: true, images: true },
@@ -780,9 +783,13 @@ router.put('/users/profile', authenticateToken, async (req, res) => {
 
     const parsed = profileUpdateSchema.safeParse(req.body || {});
     if (!parsed.success) {
+      console.error('[users/profile] Validation error:', parsed.error.flatten());
       return res.status(400).json({ error: 'Некорректные данные профиля', details: parsed.error.flatten() });
     }
     const body = parsed.data;
+
+    console.log('[users/profile] Parsed data has image:', !!body.image);
+    console.log('[users/profile] Parsed data has images:', !!body.images);
 
     // Allow-list fields to avoid Prisma "Unknown arg" errors
     const data = {
@@ -816,10 +823,13 @@ router.put('/users/profile', authenticateToken, async (req, res) => {
       data.location_updated_at = new Date();
     }
 
+    console.log('[users/profile] Updating user with data keys:', Object.keys(data).filter(k => data[k] !== undefined));
     const user = await prisma.user.update({
       where: { id: req.user.userId },
       data,
     });
+
+    console.log('[users/profile] User updated successfully, new image:', user.image);
 
     const previousImages = new Set([
       ...(existingUser.image ? [existingUser.image] : []),
@@ -836,6 +846,7 @@ router.put('/users/profile', authenticateToken, async (req, res) => {
 
     res.json(user);
   } catch (error) {
+    console.error('[users/profile] ERROR:', error.message, error.stack);
     logError('users.profile.update', error, { userId: req.user?.userId });
     res.status(500).json({ error: 'Failed to update profile' });
   }

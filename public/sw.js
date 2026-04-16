@@ -41,6 +41,11 @@ self.addEventListener('activate', event => {
 
 // Перехват запросов и обслуживание из кэша
 self.addEventListener('fetch', event => {
+  // Исключаем API запросы из кэширования
+  if (event.request.url.includes('/api/')) {
+    return fetch(event.request);
+  }
+
   event.respondWith(
     caches.match(event.request)
       .then(response => {
@@ -48,7 +53,7 @@ self.addEventListener('fetch', event => {
         if (response) {
           return response;
         }
-        
+
         // Иначе делаем сетевой запрос
         return fetch(event.request).then(
           response => {
@@ -56,15 +61,15 @@ self.addEventListener('fetch', event => {
             if (!response || response.status !== 200 || response.type !== 'basic') {
               return response;
             }
-            
+
             // Клонируем ответ, так как он может быть использован только один раз
             const responseToCache = response.clone();
-            
+
             caches.open(CACHE_NAME)
               .then(cache => {
                 cache.put(event.request, responseToCache);
               });
-            
+
             return response;
           }
         );
