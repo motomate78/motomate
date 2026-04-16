@@ -1380,10 +1380,10 @@ router.get('/likes/sent', authenticateToken, async (req, res) => {
 // Geo Proxy Routes - to avoid CORS issues with Yandex API
 router.get('/geo/suggest', async (req, res) => {
   try {
-    const { text, type = 'geo', results = 6, lang = 'ru_RU' } = req.query;
+    const { text, results = 10 } = req.query;
     const apiKey = process.env.YANDEX_API_KEY || process.env.VITE_YANDEX_API_KEY;
 
-    console.log('[geo/suggest] Request:', { text, type, results, lang, hasApiKey: !!apiKey });
+    console.log('[geo/suggest] Request:', { text, results, hasApiKey: !!apiKey });
 
     if (!apiKey) {
       console.error('[geo/suggest] ERROR: Yandex API key not configured');
@@ -1394,8 +1394,8 @@ router.get('/geo/suggest', async (req, res) => {
       return res.json({ results: [] });
     }
 
-    // Используем Яндекс Geocoder API вместо suggest API (требует специальный ключ)
-    const yandexUrl = `https://geocode-maps.yandex.ru/1.x/?apikey=${encodeURIComponent(apiKey)}&geocode=${encodeURIComponent(String(text))}&format=json&results=${encodeURIComponent(String(results))}&lang=${encodeURIComponent(String(lang))}`;
+    // Используем Яндекс Suggest API с параметром types=locality для городов
+    const yandexUrl = `https://suggest-maps.yandex.ru/v1/suggest?apikey=${encodeURIComponent(apiKey)}&types=locality&results=${encodeURIComponent(String(results))}&lang=ru_RU&text=${encodeURIComponent(String(text))}`;
 
     console.log('[geo/suggest] Fetching:', yandexUrl);
 
@@ -1409,20 +1409,17 @@ router.get('/geo/suggest', async (req, res) => {
     const data = response.data;
     console.log('[geo/suggest] Yandex response:', data);
     
-    // Normalize response from Geocoder API
-    const featureMembers = data.response?.GeoObjectCollection?.featureMember || [];
-    const normalized = featureMembers.map((item) => {
-      const geoObject = item.GeoObject;
-      const name = geoObject.name || '';
-      const description = geoObject.description || '';
-      const displayText = [name, description].filter(Boolean).join(', ');
+    // Normalize response from Suggest API
+    const normalized = (data.results || []).map((item) => {
+      const title = item.title?.text || item.title || '';
+      const subtitle = item.subtitle?.text || item.subtitle || '';
+      const displayText = [title, subtitle].filter(Boolean).join(', ') || item.text || '';
       
-      // Extract coordinates from GeoObject
-      const pos = geoObject.Point?.pos; // Format: "lon,lat"
-      const coords = pos ? {
-        longitude: Number(pos.split(' ')[0]),
-        latitude: Number(pos.split(' ')[1])
-      } : null;
+      // Extract coordinates if available
+      const point = item?.tags?.point || item?.point;
+      const coords = point && typeof point === 'object'
+        ? { latitude: Number(point.lat), longitude: Number(point.lon) }
+        : null;
       
       return { text: displayText, coords };
     }).filter((item) => item.text);

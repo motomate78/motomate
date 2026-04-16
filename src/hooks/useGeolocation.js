@@ -79,7 +79,13 @@ export function useGeolocation(yandexMapsKey, autoRequest = false) {
       },
       (err) => {
         console.error('Geolocation error:', err);
-        setError('Разрешите доступ к геолокации в настройках браузера');
+        if (err.code === 1) {
+          // User denied - прекращаем попытки
+          setError('Разрешите доступ к геолокации в настройках браузера или введите город вручную');
+          console.warn('Geolocation denied by user, manual city selection required');
+        } else {
+          setError('Ошибка определения геолокации');
+        }
         setLoading(false);
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }

@@ -20,39 +20,18 @@ export function CityAutocomplete({ value, onChange, placeholder = 'Введи с
 
     setLoading(true);
     try {
-      // Используем бэкенд прокси вместо прямого вызова Яндекса (избегаем CORS)
+      // Используем бэкенд прокси /api/geo/suggest (Яндекс Suggest API)
       const response = await fetch(
-        `/api/geo/suggest?text=${encodeURIComponent(query)}&type=geo&results=8&lang=ru_RU`
+        `/api/geo/suggest?text=${encodeURIComponent(query)}&results=10`
       );
 
       if (response.ok) {
         const data = await response.json();
-        let results = (data?.results || [])
+        const results = (data?.results || [])
           .map((item) => String(item?.text || '').trim())
-          .map((text) => {
-            const parts = text.split(',').map((s) => s.trim()).filter(Boolean);
-            if (parts.length === 0) return '';
-            // Берем наиболее похожую на город часть, а не страну.
-            return parts.length > 1 ? parts[1] : parts[0];
-          })
           .filter(Boolean)
           .filter((city, idx, arr) => arr.indexOf(city) === idx)
-          .slice(0, 8);
-        
-        if (results.length === 0) {
-          const osmResponse = await fetch(
-            `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&addressdetails=1&accept-language=ru&q=${encodeURIComponent(query)}`
-          );
-          if (osmResponse.ok) {
-            const osmData = await osmResponse.json();
-            results = (Array.isArray(osmData) ? osmData : [])
-              .map((item) => item?.address?.city || item?.address?.town || item?.address?.village || item?.address?.state || item?.name || item?.display_name)
-              .map((city) => String(city || '').split(',')[0].trim())
-              .filter(Boolean)
-              .filter((city, idx, arr) => arr.indexOf(city) === idx)
-              .slice(0, 8);
-          }
-        }
+          .slice(0, 10);
         setSuggestions(results);
       } else {
         setSuggestions([]);

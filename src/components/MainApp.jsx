@@ -701,7 +701,7 @@ const MainApp = () => {
   const [showGroupChatEmojiPicker, setShowGroupChatEmojiPicker] = useState(false);
   const [showParticipants, setShowParticipants] = useState(false);
 
-  const [newEvent, setNewEvent] = useState({ title: '', description: '', date: '', time: '', address: '', link: '', latitude: null, longitude: null });
+  const [newEvent, setNewEvent] = useState({ title: '', description: '', date: '', time: '', address: '', link: '', city: '', latitude: null, longitude: null });
   // const fileInputRef = useRef(null);
   const profileInputRef = useRef(null);
   const galleryInputRef = useRef(null);
@@ -1443,7 +1443,7 @@ const MainApp = () => {
         const eventData = {
           title: newEvent.title.trim(),
           description: newEvent.description?.trim() || null,
-          city: userData.city,
+          city: newEvent.city || userData.city,
           date: newEvent.date,
           time: newEvent.time,
           address: newEvent.address?.trim() || null,
@@ -1451,13 +1451,13 @@ const MainApp = () => {
           latitude: typeof newEvent.latitude === 'number' ? newEvent.latitude : null,
           longitude: typeof newEvent.longitude === 'number' ? newEvent.longitude : null,
         };
-        
+
         console.log('🚀 Вызываем eventService.createEvent с данными:', eventData);
         await eventService.createEvent(eventData);
-        
-        setNewEvent({ title: '', description: '', date: '', time: '', address: '', link: '', latitude: null, longitude: null });
+
+        setNewEvent({ title: '', description: '', date: '', time: '', address: '', link: '', city: '', latitude: null, longitude: null });
         setShowEventModal(false);
-        
+
         if (window.apiManager && window.apiManager.loadEvents) {
           window.apiManager.loadEvents();
         }
@@ -2155,8 +2155,14 @@ const MainApp = () => {
               <div className="px-4 mt-6 pb-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">События в вашем городе</h3>
-                <button 
-                  onClick={() => setShowEventModal(true)}
+                <button
+                  onClick={() => {
+                    setNewEvent(prev => ({
+                      ...prev,
+                      city: userData?.city || ''
+                    }));
+                    setShowEventModal(true);
+                  }}
                   className="bg-orange-600 w-8 h-8 rounded-full flex items-center justify-center active:scale-90"
                 >
                   <Plus size={16} />
