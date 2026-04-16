@@ -89,6 +89,19 @@ const ApiManager = ({ userData, onUsersLoaded, onChatsLoaded, onEventsLoaded }) 
       // Handle both old array format and new {users, total, page, limit} format
       const users = Array.isArray(response) ? response : (response.users || []);
       
+      // Parse images for all users (handle both array and JSON string format)
+      const usersWithParsedImages = users.map(user => {
+        let images = user.images;
+        if (typeof images === 'string') {
+          try {
+            images = JSON.parse(images);
+          } catch (e) {
+            images = [];
+          }
+        }
+        return { ...user, images: images || [] };
+      });
+      
       // Get chats to exclude already known users
       const chats = await apiClient.getChats();
       const matchedIds = chats?.map(chat => 
@@ -100,7 +113,7 @@ const ApiManager = ({ userData, onUsersLoaded, onChatsLoaded, onEventsLoaded }) 
       const likedIds = matches?.map(match => match.id) || [];
       
       // Filter users
-      const filteredUsers = users.filter(user => 
+      const filteredUsers = usersWithParsedImages.filter(user => 
         !matchedIds.includes(user.id) && 
         !likedIds.includes(user.id)
       );

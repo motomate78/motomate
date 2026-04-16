@@ -574,11 +574,22 @@ const MainApp = () => {
                     
                   if (user) {
                     console.log('Setting userData and userImages...');
+                    
+                    // Parse images if it's a JSON string
+                    let parsedImages = user.images;
+                    if (typeof parsedImages === 'string') {
+                      try {
+                        parsedImages = JSON.parse(parsedImages);
+                      } catch (e) {
+                        parsedImages = [];
+                      }
+                    }
+                    
                     setUserData(user);
-                    if (user.images && Array.isArray(user.images)) {
-                        console.log('Setting userImages:', user.images.length);
-                        setUserImages(user.images);
-                        localStorage.setItem('userImages', JSON.stringify(user.images));
+                    if (parsedImages && Array.isArray(parsedImages)) {
+                        console.log('Setting userImages:', parsedImages.length);
+                        setUserImages(parsedImages);
+                        localStorage.setItem('userImages', JSON.stringify(parsedImages));
                     } else {
                         console.log('No images array found, setting empty array');
                         setUserImages([]);
@@ -1074,13 +1085,23 @@ const MainApp = () => {
   const switchImage = (e) => {
     if (!currentBiker) return;
     
+    // Ensure images is an array
+    let images = currentBiker.images;
+    if (typeof images === 'string') {
+      try {
+        images = JSON.parse(images);
+      } catch (e) {
+        images = [];
+      }
+    }
+    
     // Если у пользователя нет изображений, не переключаем
-    if (!currentBiker.images || currentBiker.images.length === 0) return;
+    if (!images || images.length === 0) return;
     
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     if (x > rect.width / 2) {
-      if (currentImageIndex < currentBiker.images.length - 1) {
+      if (currentImageIndex < images.length - 1) {
         setCurrentImageIndex(prev => prev + 1);
       } else {
         setCurrentImageIndex(0);
@@ -1626,8 +1647,19 @@ const MainApp = () => {
        
        // Combine all images (avatar + gallery)
        let allImages = [];
-       if (data.images && Array.isArray(data.images) && data.images.length > 0) {
-           allImages = data.images;
+       let parsedImages = data.images;
+       
+       // Parse images if it's a JSON string
+       if (typeof parsedImages === 'string') {
+         try {
+           parsedImages = JSON.parse(parsedImages);
+         } catch (e) {
+           parsedImages = [];
+         }
+       }
+       
+       if (parsedImages && Array.isArray(parsedImages) && parsedImages.length > 0) {
+           allImages = parsedImages;
        } else if (data.image) {
            allImages = [data.image];
        } else {

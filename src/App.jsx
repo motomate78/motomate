@@ -55,6 +55,39 @@ function App() {
   };
 
   useEffect(() => {
+    let mounted = true;
+    
+    // Handle logout URL parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const isLogout = urlParams.get('logout') === 'true';
+    
+    if (isLogout) {
+      // Clear all auth data
+      localStorage.removeItem('motomate_token');
+      localStorage.removeItem('userId');
+      localStorage.removeItem('userData');
+      localStorage.removeItem('userEmail');
+      localStorage.removeItem('userImages');
+      // Clear user cache keys
+      const keys = Object.keys(localStorage);
+      keys.forEach(key => {
+        if (key.startsWith('users_') || key.startsWith('chat_') || key.startsWith('events_')) {
+          localStorage.removeItem(key);
+        }
+      });
+      // Remove logout param from URL
+      window.history.replaceState({}, document.title, window.location.origin);
+      // Set logged out state
+      if (mounted) {
+        setIsLoggedIn(false);
+        setIsAuthModalOpen(true);
+        setIsLoading(false);
+      }
+      return () => {
+        mounted = false;
+      };
+    }
+    
     // Очистка старых ключей Supabase и инициализация для локальных тестов
     const cleanLegacyStorage = () => {
       const legacyKeys = [
@@ -68,8 +101,6 @@ function App() {
       // Локальный мок‑логин отключён: в MVP используем реальную сессию (Яндекс ID → JWT).
     };
     cleanLegacyStorage();
-
-    let mounted = true;
     
     // Проверяем сессии асинхронно, но быстро
     const checkSession = async () => {
