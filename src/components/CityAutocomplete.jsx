@@ -27,11 +27,32 @@ export function CityAutocomplete({ value, onChange, placeholder = 'Введи с
 
       if (response.ok) {
         const data = await response.json();
-        const results = (data?.results || [])
-          .map((item) => String(item?.text || '').split(',')[0].trim())
+        let results = (data?.results || [])
+          .map((item) => String(item?.text || '').trim())
+          .map((text) => {
+            const parts = text.split(',').map((s) => s.trim()).filter(Boolean);
+            if (parts.length === 0) return '';
+            // Берем наиболее похожую на город часть, а не страну.
+            return parts.length > 1 ? parts[1] : parts[0];
+          })
           .filter(Boolean)
           .filter((city, idx, arr) => arr.indexOf(city) === idx)
           .slice(0, 8);
+        
+        if (results.length === 0) {
+          const osmResponse = await fetch(
+            `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&addressdetails=1&accept-language=ru&q=${encodeURIComponent(query)}`
+          );
+          if (osmResponse.ok) {
+            const osmData = await osmResponse.json();
+            results = (Array.isArray(osmData) ? osmData : [])
+              .map((item) => item?.address?.city || item?.address?.town || item?.address?.village || item?.address?.state || item?.name || item?.display_name)
+              .map((city) => String(city || '').split(',')[0].trim())
+              .filter(Boolean)
+              .filter((city, idx, arr) => arr.indexOf(city) === idx)
+              .slice(0, 8);
+          }
+        }
         setSuggestions(results);
       } else {
         setSuggestions([]);

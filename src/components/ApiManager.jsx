@@ -108,9 +108,9 @@ const ApiManager = ({ userData, onUsersLoaded, onChatsLoaded, onEventsLoaded }) 
         chat.participant_1_id === localStorage.getItem('userId') ? chat.participant_2_id : chat.participant_1_id
       ) || [];
       
-      // Get likes/dislikes
-      const matches = await apiClient.getMatches();
-      const likedIds = matches?.map(match => match.id) || [];
+      // Exclude users already liked by current user (not only reciprocal matches)
+      const sentLikes = await apiClient.getSentLikes();
+      const likedIds = Array.isArray(sentLikes) ? sentLikes : [];
       
       // Filter users
       const filteredUsers = usersWithParsedImages.filter(user => 

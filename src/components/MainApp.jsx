@@ -1206,6 +1206,26 @@ const MainApp = () => {
     }
   };
 
+  const deleteGalleryImageByUrl = async (imageUrl) => {
+    const token = localStorage.getItem('motomate_token');
+    if (!token || !imageUrl) return;
+    try {
+      const listRes = await fetch('/api/users/profile/images', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!listRes.ok) return;
+      const list = await listRes.json();
+      const target = (Array.isArray(list) ? list : []).find((item) => item?.url === imageUrl);
+      if (!target?.id) return;
+      await fetch(`/api/users/profile/images/${target.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch (error) {
+      console.error('Error deleting gallery image metadata:', error);
+    }
+  };
+
   const handleEmailUpdate = async () => {
     if (!newEmail || !newEmail.includes('@')) {
         alert('Введите корректный email');
@@ -2835,8 +2855,7 @@ const MainApp = () => {
             )}
             
             {/* ГАЛЕРЕЯ ФОТО */}
-            {userImages.length > 0 && (
-              <div className="w-full mb-6">
+            <div className="w-full mb-6">
                 <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500 mb-4 ml-1">Галерея</h3>
                 <div className="grid grid-cols-3 gap-3 w-full">
                   {userImages.map((img, idx) => {
@@ -2854,9 +2873,11 @@ const MainApp = () => {
                           onClick={async (e) => {
                             e.stopPropagation(); // Предотвращаем открытие модального окна при удалении
                             if (window.confirm('Вы точно хотите удалить фотографию?')) {
+                              const imageToDelete = userImages[idx];
                               const newImages = userImages.filter((_, i) => i !== idx);
                               setUserImages(newImages);
                               await updateGallery(newImages);
+                              await deleteGalleryImageByUrl(imageToDelete);
                               // Если удаляем главное фото, убираем его из userData, но НЕ заменяем автоматически
                               if (isMainPhoto) {
                                 setUserData({...userData, image: null});
@@ -2883,7 +2904,6 @@ const MainApp = () => {
                   </button>
                 </div>
               </div>
-            )}
             
             {/* Скрытый input для галереи */}
             <input 

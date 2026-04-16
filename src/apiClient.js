@@ -206,6 +206,10 @@ class ApiClient {
     return this.request('/likes/matches');
   }
 
+  async getSentLikes() {
+    return this.request('/likes/sent');
+  }
+
   // Events methods
   async getEvents(params = {}) {
     const searchParams = new URLSearchParams(params);

@@ -1312,11 +1312,25 @@ router.get('/likes/matches', authenticateToken, async (req, res) => {
   }
 });
 
+router.get('/likes/sent', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const sentLikes = await prisma.like.findMany({
+      where: { from_user_id: userId },
+      select: { to_user_id: true },
+    });
+    res.json(sentLikes.map((like) => like.to_user_id));
+  } catch (error) {
+    logError('likes.sent', error, { userId: req.user?.userId });
+    res.status(500).json({ error: 'Failed to get sent likes' });
+  }
+});
+
 // Geo Proxy Routes - to avoid CORS issues with Yandex API
 router.get('/geo/suggest', async (req, res) => {
   try {
     const { text, type = 'geo', results = 6, lang = 'ru_RU' } = req.query;
-    const apiKey = process.env.YANDEX_API_KEY;
+    const apiKey = process.env.YANDEX_API_KEY || process.env.VITE_YANDEX_API_KEY;
 
     if (!apiKey) {
       return res.status(500).json({ error: 'Yandex API key not configured' });

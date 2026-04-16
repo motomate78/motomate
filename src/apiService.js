@@ -130,7 +130,7 @@ export const userService = {
           
           // Сохраняем метаданные в Image table через бэкенд
           try {
-            const token = localStorage.getItem('token');
+            const token = localStorage.getItem('motomate_token');
             const saveRes = await fetch('/api/users/profile/images', {
               method: 'POST',
               headers: {
