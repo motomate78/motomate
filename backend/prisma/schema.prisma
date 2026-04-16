@@ -17,6 +17,7 @@ model User {
   name                 String?
   age                  Int?
   city                 String?
+  address              String?
   bike                 String?
   gender               String?
   has_bike             Boolean  @default(false)

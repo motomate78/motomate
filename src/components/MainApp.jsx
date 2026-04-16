@@ -4,6 +4,7 @@ import ApiManager from './ApiManager';
 import { apiClient } from '../apiClient';
 import { userService, eventService, groupChatService, compressImage } from '../apiService';
 import { useGeolocation } from '../hooks/useGeolocation';
+import { useAddressSuggest } from '../hooks/useAddressSuggest';
 import { CityAutocomplete } from './CityAutocomplete';
 import { AddressAutocomplete } from './AddressAutocomplete';
 const EventsMap = React.lazy(() => import('./EventsMap'));
@@ -550,6 +551,7 @@ const MainApp = () => {
                        name: null,
                        age: null,
                        city: "Moscow",
+                       address: null,
                        bike: "",
                        gender: "male",
                        has_bike: false,
@@ -703,6 +705,7 @@ const MainApp = () => {
   // Геолокация
   const yandexApiKey = String(import.meta.env.VITE_YANDEX_API_KEY || '').trim();
   const { city: detectedCity, coordinates: detectedCoordinates, loading: geoLoading, error: geoError, requestGeolocation, retry: retryGeolocation } = useGeolocation(yandexApiKey, false);
+  const { searchAddresses: suggestAddresses } = useAddressSuggest(yandexApiKey);
 
   useEffect(() => {
     const cityText = String(userData?.city || '').trim();
@@ -2997,7 +3000,7 @@ const MainApp = () => {
                       type="button"
                       onClick={() => requestGeolocation()}
                       disabled={geoLoading}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/50 disabled:cursor-not-allowed text-white rounded-xl font-semibold transition-all active:scale-95 flex items-center justify-center gap-2 text-sm"
+                      className="px-4 py-2 bg-orange-600 hover:bg-orange-500 disabled:bg-orange-600/50 disabled:cursor-not-allowed text-white rounded-xl font-semibold transition-all active:scale-95 flex items-center justify-center gap-2 text-sm"
                       title="Определить город по геолокации"
                     >
                       {geoLoading ? (
@@ -3020,6 +3023,15 @@ const MainApp = () => {
                   {geoError && (
                     <p className="text-xs text-red-400 mt-1">{geoError}</p>
                   )}
+                </div>
+                <div className="space-y-2"><label className="text-[10px] font-black text-zinc-600 uppercase">Адрес или место встреч</label>
+                  <AddressAutocomplete
+                    value={userData.address || ''}
+                    onChange={(result) => setUserData({ ...userData, address: result.address || result })}
+                    city={userData.city || ''}
+                    yandexMapsKey={yandexApiKey}
+                    placeholder="Где ты обычно катаешься..."
+                  />
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-zinc-600 uppercase">Пол *</label>
@@ -3130,6 +3142,7 @@ const MainApp = () => {
                         name: userData.name || null,
                         age: userData.age || null,
                         city: userData.city,
+                        address: userData.address || null,
                         bike: userData.bike,
                         has_bike: userData.has_bike,
                         gender: userData.gender,
@@ -3156,12 +3169,12 @@ const MainApp = () => {
                         setCurrentIndex(0);
                     }
                     
-                    // Reload data once after explicit save (safe: dismissed cards stay hidden).
+                    // Async reload without blocking UI
                     if (window.apiManager?.loadUsers) {
-                      window.apiManager.loadUsers();
+                      window.apiManager.loadUsers().catch(() => {});
                     }
                     if (window.apiManager?.loadEvents) {
-                      window.apiManager.loadEvents();
+                      window.apiManager.loadEvents().catch(() => {});
                     }
                   } catch (err) {
                     console.error('Error saving profile:', err);
@@ -3272,13 +3285,13 @@ const MainApp = () => {
                         setUserData((prev) => ({ ...prev, is_private: newValue }));
                        }}
                       aria-pressed={Boolean(userData?.is_private)}
-                       className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors duration-200 ${
+                       className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors duration-200 ${
                          userData?.is_private ? 'bg-orange-600' : 'bg-zinc-600'
                        }`}
                      >
                        <span
-                        className={`absolute left-1 h-5 w-5 transform rounded-full bg-white transition-transform duration-200 shadow-sm ${
-                          userData?.is_private ? 'translate-x-5' : 'translate-x-0'
+                        className={`absolute left-1 h-6 w-6 transform rounded-full bg-white transition-transform duration-200 shadow-sm ${
+                          userData?.is_private ? 'translate-x-6' : 'translate-x-0'
                          }`}
                        />
                      </button>
