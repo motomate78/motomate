@@ -127,6 +127,26 @@ export const userService = {
           const imageData = e.target.result;
           const fileName = `gallery_${userId}_${Date.now()}.jpg`;
           const result = await apiClient.uploadImage(imageData, fileName);
+          
+          // Сохраняем метаданные в Image table через бэкенд
+          try {
+            const token = localStorage.getItem('token');
+            const saveRes = await fetch('/api/users/profile/images', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ url: result.url })
+            });
+            
+            if (!saveRes.ok) {
+              console.warn('Failed to save image metadata to database, but S3 upload succeeded');
+            }
+          } catch (dbError) {
+            console.warn('Error saving image metadata to database:', dbError);
+          }
+          
           resolve(result.url);
         } catch (error) {
           console.error("Error uploading gallery image:", error);

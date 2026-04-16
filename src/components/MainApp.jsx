@@ -577,14 +577,25 @@ const MainApp = () => {
                     }
                     
                     setUserData(user);
-                    if (parsedImages && Array.isArray(parsedImages)) {
-                        console.log('Setting userImages:', parsedImages.length);
-                        setUserImages(parsedImages);
-                        localStorage.setItem('userImages', JSON.stringify(parsedImages));
-                    } else {
-                        console.log('No images array found, setting empty array');
+                    
+                    // Загружаем фото из Image table
+                    try {
+                      const imagesRes = await fetch('/api/users/profile/images', {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                      });
+                      if (imagesRes.ok) {
+                        const imagesData = await imagesRes.json();
+                        const imageUrls = (imagesData || []).map(img => img.url);
+                        setUserImages(imageUrls);
+                        localStorage.setItem('userImages', JSON.stringify(imageUrls));
+                      } else {
                         setUserImages([]);
                         localStorage.setItem('userImages', JSON.stringify([]));
+                      }
+                    } catch (err) {
+                      console.error('Error loading gallery images:', err);
+                      setUserImages([]);
+                      localStorage.setItem('userImages', JSON.stringify([]));
                     }
                     
                     // Повторно пытаемся подписаться на push уведомления после загрузки userData
