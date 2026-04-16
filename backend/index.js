@@ -1380,56 +1380,39 @@ router.get('/likes/sent', authenticateToken, async (req, res) => {
 // Geo Proxy Routes - to avoid CORS issues with Yandex API
 router.get('/geo/suggest', async (req, res) => {
   try {
-    const { text, results = 10 } = req.query;
-    const apiKey = process.env.YANDEX_API_KEY || process.env.VITE_YANDEX_API_KEY;
+    const { text } = req.query;
+    if (!text) return res.json([]);
 
-    console.log('[geo/suggest] Request:', { text, results, hasApiKey: !!apiKey });
+    console.log('[geo/suggest] Поиск города для:', text);
 
-    if (!apiKey) {
-      console.error('[geo/suggest] ERROR: Yandex API key not configured');
-      return res.status(500).json({ error: 'Yandex API key not configured' });
-    }
+    const apiKey = process.env.YANDEX_API_KEY || process.env.VITE_YANDEX_API_KEY || 'a6c357be-b68a-4dd4-ba13-21d17b70646e';
+    // Используем URLSearchParams для безопасной сборки строки
+    const params = new URLSearchParams({
+      apikey: apiKey,
+      text: text,
+      types: 'locality',
+      results: '10',
+      lang: 'ru_RU'
+    });
 
-    if (!text || String(text).trim().length < 2) {
-      return res.json({ results: [] });
-    }
-
-    // Используем Яндекс Suggest API с параметром types=locality для городов
-    const yandexUrl = `https://suggest-maps.yandex.ru/v1/suggest?apikey=${encodeURIComponent(apiKey)}&types=locality&results=${encodeURIComponent(String(results))}&lang=ru_RU&text=${encodeURIComponent(String(text))}`;
+    const yandexUrl = `https://suggest-maps.yandex.ru/v1/suggest?${params.toString()}`;
 
     console.log('[geo/suggest] Fetching:', yandexUrl);
 
     const response = await axios.get(yandexUrl, { timeout: 10000 });
-    
-    if (response.status !== 200) {
-      console.error('[geo/suggest] Yandex API error:', response.status, response.data);
-      return res.status(response.status).json({ error: 'Yandex API error' });
-    }
 
-    const data = response.data;
-    console.log('[geo/suggest] Yandex response:', data);
-    
-    // Normalize response from Suggest API
-    const normalized = (data.results || []).map((item) => {
-      const title = item.title?.text || item.title || '';
-      const subtitle = item.subtitle?.text || item.subtitle || '';
-      const displayText = [title, subtitle].filter(Boolean).join(', ') || item.text || '';
-      
-      // Extract coordinates if available
-      const point = item?.tags?.point || item?.point;
-      const coords = point && typeof point === 'object'
-        ? { latitude: Number(point.lat), longitude: Number(point.lon) }
-        : null;
-      
-      return { text: displayText, coords };
-    }).filter((item) => item.text);
+    console.log('[geo/suggest] Yandex response status:', response.status);
 
-    console.log('[geo/suggest] Normalized results:', normalized.length);
-    res.json({ results: normalized });
+    // Возвращаем только нужные данные фронтенду
+    res.json(response.data.results || []);
+
   } catch (error) {
-    console.error('[geo/suggest] ERROR:', error.message, error.stack);
-    logError('geo.suggest', error);
-    res.status(500).json({ error: 'Failed to fetch suggestions', details: error.message });
+    console.error('[geo/suggest] ОШИБКА ГЕО-ПРОКСИ:', error.message);
+    // Отправляем детали ошибки на фронт, чтобы мы видели их в консоли браузера!
+    res.status(500).json({
+      error: 'Ошибка сервера при запросе к Яндексу',
+      details: error.message
+    });
   }
 });
 
