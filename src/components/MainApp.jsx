@@ -6,6 +6,7 @@ import { userService, eventService, groupChatService, compressImage } from '../a
 import { useGeolocation } from '../hooks/useGeolocation';
 import { useAddressSuggest } from '../hooks/useAddressSuggest';
 import { CityAutocomplete } from './CityAutocomplete';
+import { AddressAutocomplete } from './AddressAutocomplete';
 const EventsMap = React.lazy(() => import('./EventsMap'));
 
 const isValidAdultAge = (age) => Number.isInteger(age) && age >= 18;

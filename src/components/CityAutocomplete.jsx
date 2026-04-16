@@ -24,19 +24,16 @@ export function CityAutocomplete({ value, onChange, placeholder = 'Введи с
       const apiKey = String(yandexMapsKey || import.meta.env.VITE_YANDEX_API_KEY || '').trim();
       if (apiKey) {
         const response = await fetch(
-          `https://geocode-maps.yandex.ru/1.x/?apikey=${apiKey}&geocode=${encodeURIComponent(query)}&kind=locality&results=8&format=json&lang=ru_RU`
+          `https://suggest-maps.yandex.ru/v1/suggest?apikey=${apiKey}&text=${encodeURIComponent(query)}&type=geo&results=8&lang=ru_RU`
         );
 
         if (response.ok) {
           const data = await response.json();
-          const featureMembers = data?.response?.GeoObjectCollection?.featureMember || [];
-          results = featureMembers
+          results = (data?.results || [])
             .map((item) => {
-              const meta = item?.GeoObject?.metaDataProperty?.GeocoderMetaData;
-              const locality = meta?.Address?.Components?.find((component) => component.kind === 'locality')?.name;
-              const administrative = meta?.Address?.Components?.find((component) => component.kind === 'province')?.name;
-              const fallbackText = item?.GeoObject?.name || meta?.text || '';
-              return locality || administrative || fallbackText;
+              const title = item?.title?.text || item?.title || '';
+              const subtitle = item?.subtitle?.text || item?.subtitle || '';
+              return [title, subtitle].filter(Boolean).join(', ');
             })
             .map((city) => String(city || '').split(',')[0].trim())
             .filter(Boolean)

@@ -26,7 +26,7 @@ export function useAddressSuggest(yandexMapsKey) {
       
       if (yandexMapsKey) {
         const response = await fetch(
-          `https://suggest-maps.yandex.ru/v1/suggest?apikey=${yandexMapsKey}&text=${encodeURIComponent(searchQuery)}&types=geo&lang=ru`,
+          `https://suggest-maps.yandex.ru/v1/suggest?apikey=${yandexMapsKey}&text=${encodeURIComponent(searchQuery)}&type=geo&results=8&lang=ru_RU`,
           {
             headers: {
               'Content-Type': 'application/json',
