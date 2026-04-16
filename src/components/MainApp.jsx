@@ -717,7 +717,7 @@ const MainApp = () => {
 
   // Геолокация
   const yandexApiKey = String(import.meta.env.VITE_YANDEX_API_KEY || '').trim();
-  const { city: detectedCity, coordinates: detectedCoordinates, loading: geoLoading, error: geoError, requestGeolocation, retry: retryGeolocation } = useGeolocation(yandexApiKey, false);
+  const { city: detectedCity, coordinates: detectedCoordinates, loading: geoLoading, error: geoError, requestGeolocation } = useGeolocation(yandexApiKey, false);
   const { searchAddresses: suggestAddresses } = useAddressSuggest(yandexApiKey);
 
   useEffect(() => {
@@ -3406,11 +3406,14 @@ const MainApp = () => {
                     <AddressAutocomplete
                       value={newEvent.address}
                       onChange={(result) => {
+                        const normalized = typeof result === 'string'
+                          ? { address: result, coordinates: null }
+                          : (result || { address: '', coordinates: null });
                         setNewEvent((prev) => ({
                           ...prev,
-                          address: result.address || result,
-                          latitude: result.coordinates?.lat ?? null,
-                          longitude: result.coordinates?.lon ?? null,
+                          address: normalized.address || '',
+                          latitude: normalized.coordinates?.lat ?? null,
+                          longitude: normalized.coordinates?.lon ?? null,
                         }));
                       }}
                       city={userData?.city || ''}

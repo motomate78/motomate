@@ -28,7 +28,7 @@ export function CityAutocomplete({ value, onChange, placeholder = 'Введи с
       }
 
       const response = await fetch(
-        `https://suggest-maps.yandex.ru/v1/suggest?apikey=${apiKey}&text=${encodeURIComponent(query)}&type=geo&results=8&lang=ru_RU`
+        `https://geocode-maps.yandex.ru/1.x/?apikey=${apiKey}&geocode=${encodeURIComponent(query)}&kind=locality&results=8&format=json&lang=ru_RU`
       );
 
       if (!response.ok) {
@@ -38,13 +38,16 @@ export function CityAutocomplete({ value, onChange, placeholder = 'Введи с
       }
 
       const data = await response.json();
-      const results = (data.results || [])
+      const featureMembers = data?.response?.GeoObjectCollection?.featureMember || [];
+      const results = featureMembers
         .map((item) => {
-          const title = item.title?.text || item.title || '';
-          const subtitle = item.subtitle?.text || item.subtitle || '';
-          const displayText = [title, subtitle].filter(Boolean).join(', ').split(',')[0].trim();
-          return displayText;
+          const meta = item?.GeoObject?.metaDataProperty?.GeocoderMetaData;
+          const locality = meta?.Address?.Components?.find((component) => component.kind === 'locality')?.name;
+          const administrative = meta?.Address?.Components?.find((component) => component.kind === 'province')?.name;
+          const fallbackText = item?.GeoObject?.name || meta?.text || '';
+          return locality || administrative || fallbackText;
         })
+        .map((city) => String(city || '').split(',')[0].trim())
         .filter(Boolean)
         .filter((city, idx, arr) => arr.indexOf(city) === idx) // Remove duplicates
         .slice(0, 8);

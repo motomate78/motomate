@@ -41,12 +41,29 @@ export default function EventsMap({ userData, bikers = [], events = [] }) {
   const [loadError, setLoadError] = useState(null);
   const [isReady, setIsReady] = useState(false);
   const [geocodedEventCoords, setGeocodedEventCoords] = useState({});
+  const [browserCoords, setBrowserCoords] = useState(null);
 
   const center = useMemo(() => {
-    const lat = parseCoord(userData?.latitude);
-    const lng = parseCoord(userData?.longitude);
+    const lat = parseCoord(userData?.latitude) ?? parseCoord(browserCoords?.lat);
+    const lng = parseCoord(userData?.longitude) ?? parseCoord(browserCoords?.lng);
     if (lat != null && lng != null) return [lat, lng];
     return DEFAULT_CENTER;
+  }, [userData?.latitude, userData?.longitude, browserCoords?.lat, browserCoords?.lng]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !navigator.geolocation) return;
+    if (parseCoord(userData?.latitude) != null && parseCoord(userData?.longitude) != null) return;
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        setBrowserCoords({ lat: latitude, lng: longitude });
+      },
+      () => {
+        // Silent fallback to default center.
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
   }, [userData?.latitude, userData?.longitude]);
 
   useEffect(() => {
@@ -100,8 +117,8 @@ export default function EventsMap({ userData, bikers = [], events = [] }) {
 
   const objects = useMemo(() => {
     const pts = [];
-    const myLat = parseCoord(userData?.latitude);
-    const myLng = parseCoord(userData?.longitude);
+    const myLat = parseCoord(userData?.latitude) ?? parseCoord(browserCoords?.lat);
+    const myLng = parseCoord(userData?.longitude) ?? parseCoord(browserCoords?.lng);
     if (myLat != null && myLng != null) pts.push({ type: 'me', id: 'me', lat: myLat, lng: myLng });
 
     for (const b of bikers) {
@@ -124,7 +141,7 @@ export default function EventsMap({ userData, bikers = [], events = [] }) {
       pts.push({ type: 'event', id: `e_${e.id}`, lat, lng, title: e?.title });
     }
     return pts;
-  }, [userData?.latitude, userData?.longitude, bikers, events, geocodedEventCoords]);
+  }, [userData?.latitude, userData?.longitude, browserCoords?.lat, browserCoords?.lng, bikers, events, geocodedEventCoords]);
 
   useEffect(() => {
     let cancelled = false;

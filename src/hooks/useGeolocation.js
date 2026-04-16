@@ -92,5 +92,5 @@ export function useGeolocation(yandexMapsKey, autoRequest = false) {
     requestGeolocation();
   }, [requestGeolocation]);
 
-  return { city, coordinates, loading, error, retry, setCity };
+  return { city, coordinates, loading, error, retry, requestGeolocation, setCity };
 }
