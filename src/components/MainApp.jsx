@@ -585,7 +585,8 @@ const MainApp = () => {
                       });
                       if (imagesRes.ok) {
                         const imagesData = await imagesRes.json();
-                        const imageUrls = (imagesData || []).map(img => img.url);
+                        // imagesData теперь просто массив, не { images: ... }
+                        const imageUrls = (Array.isArray(imagesData) ? imagesData : []).map(img => img.url);
                         setUserImages(imageUrls);
                         localStorage.setItem('userImages', JSON.stringify(imageUrls));
                       } else {

@@ -8,9 +8,15 @@ export function CityAutocomplete({ value, onChange, placeholder = 'Введи с
   const [isOpen, setIsOpen] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [tempCity, setTempCity] = useState(value); // Локальное состояние для ввода
   const inputRef = useRef(null);
   const dropdownRef = useRef(null);
   const debounceTimeoutRef = useRef(null);
+
+  // Синхронизируем tempCity когда value меняется извне (например при загрузке профиля)
+  useEffect(() => {
+    setTempCity(value);
+  }, [value]);
 
   const fetchCities = async (query) => {
     if (!query || query.length < 2) {
@@ -48,7 +54,7 @@ export function CityAutocomplete({ value, onChange, placeholder = 'Введи с
 
   const handleInputChange = (e) => {
     const text = e.target.value;
-    onChange(text);
+    setTempCity(text); // Обновляем только локальное состояние
 
     if (debounceTimeoutRef.current) {
       clearTimeout(debounceTimeoutRef.current);
@@ -67,7 +73,8 @@ export function CityAutocomplete({ value, onChange, placeholder = 'Введи с
   };
 
   const handleSelectCity = (city) => {
-    onChange(city);
+    setTempCity(city); // Обновляем локальное состояние
+    onChange(city); // Вызываем onChange только при выборе из dropdown
     setIsOpen(false);
     setSuggestions([]);
   };
@@ -91,9 +98,9 @@ export function CityAutocomplete({ value, onChange, placeholder = 'Введи с
       <input
         ref={inputRef}
         type="text"
-        value={value}
+        value={tempCity}
         onChange={handleInputChange}
-        onFocus={() => value.length > 0 && suggestions.length > 0 && setIsOpen(true)}
+        onFocus={() => tempCity.length > 0 && suggestions.length > 0 && setIsOpen(true)}
         placeholder={placeholder}
         className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 text-white rounded-lg focus:outline-none focus:border-orange-500 transition"
       />

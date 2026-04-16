@@ -11,17 +11,22 @@ export function AddressAutocomplete({
   placeholder = 'Адрес события...'
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(typeof value === 'string' ? value : value?.address || ''); // Инициализируем из value
   const inputRef = useRef(null);
   const dropdownRef = useRef(null);
   const debounceTimerRef = useRef(null);
 
   const { suggestions, loading, searchAddresses, geocodeAddress } = useAddressSuggest();
 
+  // Синхронизируем query когда value меняется извне
+  useEffect(() => {
+    const newValue = typeof value === 'string' ? value : value?.address || '';
+    setQuery(newValue);
+  }, [value]);
+
   const handleInputChange = (e) => {
     const text = e.target.value;
-    setQuery(text);
-    onChange({ address: text, coordinates: null });
+    setQuery(text); // Обновляем только локальное состояние
 
     // Debounce поиск
     if (debounceTimerRef.current) {
@@ -44,12 +49,13 @@ export function AddressAutocomplete({
     // Пытаемся получить координаты выбранного адреса
     const geocoded = await geocodeAddress(fullAddress, city);
     
+    // Вызываем onChange только при выборе из dropdown
     onChange({
       address: fullAddress,
       coordinates: geocoded ? { lat: geocoded.lat, lon: geocoded.lon } : null,
     });
     
-    setQuery('');
+    setQuery(fullAddress); // Обновляем локальное состояние после выбора
     setIsOpen(false);
   }, [city, geocodeAddress, onChange]);
 
@@ -79,10 +85,10 @@ export function AddressAutocomplete({
       <input
         ref={inputRef}
         type="text"
-        value={query || displayValue}
+        value={query}
         onChange={handleInputChange}
         onFocus={() => {
-          if (query || displayValue) {
+          if (query) {
             setIsOpen(true);
           }
         }}

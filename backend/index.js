@@ -12,7 +12,6 @@ const { z } = require('zod');
 const serverless = require('serverless-http');
 const { Server: SocketIOServer } = require('socket.io');
 const webpush = require('web-push');
-const axios = require('axios');
 require('dotenv').config();
 
 const app = express();
@@ -748,19 +747,6 @@ router.get('/users/:id', authenticateToken, async (req, res) => {
       }
     }
 
-    // Load gallery images from Image table
-    try {
-      const galleryImages = await prisma.image.findMany({
-        where: { user_id: req.params.id },
-        orderBy: { order: 'asc' },
-        select: { url: true },
-      });
-      user.gallery = galleryImages.map(img => img.url);
-    } catch (e) {
-      console.error('[users/:id] Error loading gallery:', e);
-      user.gallery = [];
-    }
-
     res.json(user);
   } catch (error) {
     console.error('Get user by id error:', error);
@@ -770,9 +756,6 @@ router.get('/users/:id', authenticateToken, async (req, res) => {
 
 router.put('/users/profile', authenticateToken, async (req, res) => {
   try {
-    console.log('[users/profile] UPDATE request for user:', req.user.userId);
-    console.log('[users/profile] Request body keys:', Object.keys(req.body || {}));
-
     const existingUser = await prisma.user.findUnique({
       where: { id: req.user.userId },
       select: { image: true, images: true },
@@ -783,13 +766,9 @@ router.put('/users/profile', authenticateToken, async (req, res) => {
 
     const parsed = profileUpdateSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      console.error('[users/profile] Validation error:', parsed.error.flatten());
       return res.status(400).json({ error: 'Некорректные данные профиля', details: parsed.error.flatten() });
     }
     const body = parsed.data;
-
-    console.log('[users/profile] Parsed data has image:', !!body.image);
-    console.log('[users/profile] Parsed data has images:', !!body.images);
 
     // Allow-list fields to avoid Prisma "Unknown arg" errors
     const data = {
@@ -823,13 +802,10 @@ router.put('/users/profile', authenticateToken, async (req, res) => {
       data.location_updated_at = new Date();
     }
 
-    console.log('[users/profile] Updating user with data keys:', Object.keys(data).filter(k => data[k] !== undefined));
     const user = await prisma.user.update({
       where: { id: req.user.userId },
       data,
     });
-
-    console.log('[users/profile] User updated successfully, new image:', user.image);
 
     const previousImages = new Set([
       ...(existingUser.image ? [existingUser.image] : []),
@@ -846,7 +822,6 @@ router.put('/users/profile', authenticateToken, async (req, res) => {
 
     res.json(user);
   } catch (error) {
-    console.error('[users/profile] ERROR:', error.message, error.stack);
     logError('users.profile.update', error, { userId: req.user?.userId });
     res.status(500).json({ error: 'Failed to update profile' });
   }
@@ -969,34 +944,28 @@ router.delete('/users/me', authenticateToken, async (req, res) => {
 router.get('/users/profile/images', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
-    console.log('[users/profile/images] Request for user:', userId);
-
     const images = await prisma.image.findMany({
       where: { user_id: userId },
       orderBy: { order: 'asc' },
       select: { id: true, url: true, is_main: true, created_at: true },
     });
-
-    console.log('[users/profile/images] Found images:', images.length);
-    res.json({ images });
+    res.json(images); // Возвращаем просто массив, не { images: ... }
   } catch (error) {
-    console.error('[users/profile/images] ERROR:', error.message, error.stack);
     logError('users.profile.images.get', error, { userId: req.user?.userId });
-    // Если таблица Image не существует или другая ошибка, возвращаем пустой массив вместо 500
-    res.json({ images: [] });
+    res.status(500).json({ error: 'Failed to get images' });
   }
 });
 
 router.post('/users/profile/images', authenticateToken, async (req, res) => {
   try {
     const userId = req.user.userId;
-    const { imageData, url } = req.body;
+    const { url, imageData } = req.body;
 
-    // Support both base64 upload and pre-uploaded URL
-    let imageUrl;
-
-    if (imageData) {
-      // Parse base64 data URI
+    // Поддерживаем оба формата: { url } и { imageData }
+    let imageUrl = url;
+    
+    if (imageData && !url) {
+      // Если передан imageData (base64), обрабатываем его
       const matches = imageData.match(/^data:([^;]+);base64,(.+)$/);
       if (!matches) {
         return res.status(400).json({ error: 'Invalid image format' });
@@ -1020,11 +989,8 @@ router.post('/users/profile/images', authenticateToken, async (req, res) => {
       const timestamp = Date.now();
       const fileName = `users/${userId}/images/${timestamp}.jpg`;
       imageUrl = await uploadToS3(buffer, fileName, mimeType);
-    } else if (url) {
-      // Use pre-uploaded URL (from S3)
-      imageUrl = url;
-    } else {
-      return res.status(400).json({ error: 'Missing imageData or url' });
+    } else if (!url) {
+      return res.status(400).json({ error: 'Missing url or imageData' });
     }
 
     // Save to database
@@ -1037,10 +1003,8 @@ router.post('/users/profile/images', authenticateToken, async (req, res) => {
       select: { id: true, url: true, is_main: true, created_at: true },
     });
 
-    console.log('[users/profile/images] Image saved to DB:', image.id);
-    res.json({ image });
+    res.json(image);
   } catch (error) {
-    console.error('[users/profile/images] ERROR:', error.message, error.stack);
     logError('users.profile.images.post', error, { userId: req.user?.userId });
     res.status(500).json({ error: 'Failed to upload image' });
   }
@@ -1253,26 +1217,19 @@ router.post('/likes', authenticateToken, likesLimiter, async (req, res) => {
     const { to_user_id } = req.body;
     const from_user_id = req.user.userId;
 
-    console.log('[likes] Toggle like:', { from_user_id, to_user_id });
-
     const existingLike = await prisma.like.findUnique({
       where: {
         from_user_id_to_user_id: { from_user_id, to_user_id },
       },
     });
 
-    console.log('[likes] Existing like:', !!existingLike);
-
     if (existingLike) {
-      console.log('[likes] Deleting existing like');
       await prisma.like.delete({ where: { id: existingLike.id } });
       res.json({ liked: false });
     } else {
-      console.log('[likes] Creating new like');
       // ATOMICITY: Use transaction to prevent race condition
       const result = await prisma.$transaction(async (tx) => {
-        const newLike = await tx.like.create({ data: { from_user_id, to_user_id } });
-        console.log('[likes] Like created in DB:', newLike.id);
+        await tx.like.create({ data: { from_user_id, to_user_id } });
         
         const reciprocalLike = await tx.like.findUnique({
           where: {
@@ -1283,12 +1240,9 @@ router.post('/likes', authenticateToken, likesLimiter, async (req, res) => {
           },
         });
 
-        console.log('[likes] Reciprocal like found:', !!reciprocalLike);
-
         let chatId = null;
         if (reciprocalLike) {
           chatId = [from_user_id, to_user_id].sort().join('_');
-          console.log('[likes] Match! Creating chat:', chatId);
           
           // Create or update Chat
           await tx.chat.upsert({
@@ -1303,7 +1257,7 @@ router.post('/likes', authenticateToken, likesLimiter, async (req, res) => {
 
           // Create or update Match
           const [user1, user2] = [from_user_id, to_user_id].sort();
-          const match = await tx.match.upsert({
+          await tx.match.upsert({
             where: {
               user_id_1_user_id_2: {
                 user_id_1: user1,
@@ -1317,7 +1271,6 @@ router.post('/likes', authenticateToken, likesLimiter, async (req, res) => {
               chat_id: chatId,
             },
           });
-          console.log('[likes] Match created/updated:', match.id);
         }
 
         return { isMatch: !!reciprocalLike, chatId };
@@ -1330,9 +1283,8 @@ router.post('/likes', authenticateToken, likesLimiter, async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('[likes] ERROR:', error.message, error.stack);
     logError('likes.toggle', error, { userId: req.user?.userId });
-    res.status(500).json({ error: 'Failed to toggle like', details: error.message });
+    res.status(500).json({ error: 'Failed to toggle like' });
   }
 });
 
@@ -1380,47 +1332,48 @@ router.get('/likes/sent', authenticateToken, async (req, res) => {
 // Geo Proxy Routes - to avoid CORS issues with Yandex API
 router.get('/geo/suggest', async (req, res) => {
   try {
-    const { text } = req.query;
-    if (!text || text.length < 2) return res.json([]);
+    const { text, type = 'geo', results = 6, lang = 'ru_RU' } = req.query;
+    const apiKey = process.env.YANDEX_API_KEY || process.env.VITE_YANDEX_API_KEY;
 
-    console.log('[geo/suggest] Поиск города для:', text);
+    if (!apiKey) {
+      return res.status(500).json({ error: 'Yandex API key not configured' });
+    }
 
-    // Используем Nominatim (OpenStreetMap) вместо Яндекс Suggest API
-    // Яндекс Suggest API требует специальный ключ и возвращает 403
-    const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=10&addressdetails=1&accept-language=ru&q=${encodeURIComponent(text)}`;
+    if (!text || String(text).trim().length < 2) {
+      return res.json({ results: [] });
+    }
 
-    console.log('[geo/suggest] Fetching:', nominatimUrl);
+    const yandexUrl = new URL('https://suggest-maps.yandex.ru/v1/suggest');
+    yandexUrl.searchParams.append('apikey', apiKey);
+    yandexUrl.searchParams.append('text', String(text));
+    yandexUrl.searchParams.append('type', String(type));
+    yandexUrl.searchParams.append('results', String(results));
+    yandexUrl.searchParams.append('lang', String(lang));
 
-    const response = await axios.get(nominatimUrl, {
-      timeout: 10000,
-      headers: {
-        'User-Agent': 'MotoMate/1.0'
-      }
-    });
+    const response = await fetch(yandexUrl.toString());
+    
+    if (!response.ok) {
+      return res.status(response.status).json({ error: 'Yandex API error' });
+    }
 
-    console.log('[geo/suggest] Nominatim response status:', response.status);
-
-    // Нормализуем ответ для фронтенда
-    const results = (response.data || []).map((item) => {
-      const city = item.address?.city || item.address?.town || item.address?.village || item.name || '';
-      const region = item.address?.state || item.address?.region || '';
-      const displayText = [city, region].filter(Boolean).join(', ') || item.display_name || '';
-      const coords = item.lat && item.lon ? {
-        latitude: Number(item.lat),
-        longitude: Number(item.lon)
-      } : null;
+    const data = await response.json();
+    
+    // Normalize response
+    const normalized = (data.results || []).map((item) => {
+      const title = item.title?.text || item.title || '';
+      const subtitle = item.subtitle?.text || item.subtitle || '';
+      const displayText = [title, subtitle].filter(Boolean).join(', ') || item.text || '';
+      const point = item?.tags?.point || item?.point;
+      const coords = point && typeof point === 'object'
+        ? { latitude: Number(point.lat), longitude: Number(point.lon) }
+        : null;
       return { text: displayText, coords };
     }).filter((item) => item.text);
 
-    console.log('[geo/suggest] Normalized results:', results.length);
-    res.json({ results });
-
+    res.json({ results: normalized });
   } catch (error) {
-    console.error('[geo/suggest] ОШИБКА ГЕО-ПРОКСИ:', error.message);
-    res.status(500).json({
-      error: 'Ошибка сервера при поиске города',
-      details: error.message
-    });
+    logError('geo.suggest', error);
+    res.status(500).json({ error: 'Failed to fetch suggestions' });
   }
 });
 
