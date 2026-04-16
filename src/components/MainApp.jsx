@@ -3194,11 +3194,16 @@ const MainApp = () => {
                   </div>
                 </div>
               </div>
-              <button 
+              <button
                 onClick={async () => {
                   try {
                     if (!isRequiredProfileFilled(userData)) {
                       alert('Заполните обязательные поля: Имя, Возраст 18+, Город и Пол');
+                      return;
+                    }
+
+                    if (!userData.city || userData.city.trim().length < 2) {
+                      alert('Укажите город');
                       return;
                     }
 
