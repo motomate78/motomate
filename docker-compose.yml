@@ -14,7 +14,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-motomate}
       POSTGRES_USER: ${POSTGRES_USER:-motomate_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
       POSTGRES_INITDB_ARGS: "-c timezone=UTC"
     volumes:
       - postgres_data:/var/lib/postgresql/data
