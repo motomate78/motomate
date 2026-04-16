@@ -1394,7 +1394,8 @@ router.get('/geo/suggest', async (req, res) => {
       return res.json({ results: [] });
     }
 
-    const yandexUrl = `https://suggest-maps.yandex.ru/v1/suggest?apikey=${encodeURIComponent(apiKey)}&text=${encodeURIComponent(String(text))}&type=${encodeURIComponent(String(type))}&results=${encodeURIComponent(String(results))}&lang=${encodeURIComponent(String(lang))}`;
+    // Используем Яндекс Geocoder API вместо suggest API (требует специальный ключ)
+    const yandexUrl = `https://geocode-maps.yandex.ru/1.x/?apikey=${encodeURIComponent(apiKey)}&geocode=${encodeURIComponent(String(text))}&format=json&results=${encodeURIComponent(String(results))}&lang=${encodeURIComponent(String(lang))}`;
 
     console.log('[geo/suggest] Fetching:', yandexUrl);
 
@@ -1408,15 +1409,21 @@ router.get('/geo/suggest', async (req, res) => {
     const data = response.data;
     console.log('[geo/suggest] Yandex response:', data);
     
-    // Normalize response
-    const normalized = (data.results || []).map((item) => {
-      const title = item.title?.text || item.title || '';
-      const subtitle = item.subtitle?.text || item.subtitle || '';
-      const displayText = [title, subtitle].filter(Boolean).join(', ') || item.text || '';
-      const point = item?.tags?.point || item?.point;
-      const coords = point && typeof point === 'object'
-        ? { latitude: Number(point.lat), longitude: Number(point.lon) }
-        : null;
+    // Normalize response from Geocoder API
+    const featureMembers = data.response?.GeoObjectCollection?.featureMember || [];
+    const normalized = featureMembers.map((item) => {
+      const geoObject = item.GeoObject;
+      const name = geoObject.name || '';
+      const description = geoObject.description || '';
+      const displayText = [name, description].filter(Boolean).join(', ');
+      
+      // Extract coordinates from GeoObject
+      const pos = geoObject.Point?.pos; // Format: "lon,lat"
+      const coords = pos ? {
+        longitude: Number(pos.split(' ')[0]),
+        latitude: Number(pos.split(' ')[1])
+      } : null;
+      
       return { text: displayText, coords };
     }).filter((item) => item.text);
 

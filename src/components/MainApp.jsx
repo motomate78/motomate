@@ -1311,29 +1311,47 @@ const MainApp = () => {
             const file = e.target.files[0];
             console.log('Uploading avatar:', file.name);
             console.log('Original file size:', (file.size / 1024 / 1024).toFixed(2) + ' MB');
-            
+
             try {
                 // Показываем пользователю что происходит сжатие
                 console.log('Сжимаем изображение...');
-                
+
                 const imageUrl = await userService.uploadAvatar(userId, file, userData?.image || null);
                 console.log('Avatar uploaded:', imageUrl);
-                
+
+                // Сохраняем старую аватарку если она была
+                const oldAvatar = userData?.image;
+                const newGallery = oldAvatar && !userImages.includes(oldAvatar)
+                    ? [imageUrl, oldAvatar, ...userImages.filter(img => img !== imageUrl)]
+                    : [imageUrl, ...userImages.filter(img => img !== imageUrl)];
+
                 // Обновляем состояние аватара
                 setUserData(prev => ({...prev, image: imageUrl}));
-                
+
+                // Сохраняем в галерею через API
+                try {
+                    const token = localStorage.getItem('motomate_token');
+                    await fetch('/api/users/profile/images', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ url: imageUrl })
+                    });
+                    console.log('Avatar saved to gallery via API');
+                } catch (apiError) {
+                    console.error('Failed to save avatar to gallery via API:', apiError);
+                }
+
+                // Обновляем локальное состояние галереи
+                setUserImages(newGallery);
+                localStorage.setItem('userImages', JSON.stringify(newGallery));
+
                 // Принудительно обновляем компонент для сброса кэша изображения
                 setTimeout(() => {
                     setUserData(prev => ({...prev}));
                 }, 100);
-                
-                // Добавляем аватар в галерею с задержкой
-                setTimeout(async () => {
-                    if (!userImages.includes(imageUrl)) {
-                        console.log('Adding avatar to gallery:', imageUrl);
-                        await updateGallery([imageUrl, ...userImages]);
-                    }
-                }, 500);
             } catch (uploadError) {
                 console.error('Avatar upload error:', uploadError);
                 alert('Avatar upload error: ' + JSON.stringify(uploadError));
