@@ -585,7 +585,7 @@ const MainApp = () => {
                       });
                       if (imagesRes.ok) {
                         const imagesData = await imagesRes.json();
-                        const imageUrls = (imagesData.images || []).map(img => img.url);
+                        const imageUrls = (imagesData || []).map(img => img.url);
                         setUserImages(imageUrls);
                         localStorage.setItem('userImages', JSON.stringify(imageUrls));
                       } else {
@@ -701,7 +701,7 @@ const MainApp = () => {
   const [showGroupChatEmojiPicker, setShowGroupChatEmojiPicker] = useState(false);
   const [showParticipants, setShowParticipants] = useState(false);
 
-  const [newEvent, setNewEvent] = useState({ title: '', description: '', date: '', time: '', address: '', link: '', city: '', latitude: null, longitude: null });
+  const [newEvent, setNewEvent] = useState({ title: '', description: '', date: '', time: '', address: '', link: '', latitude: null, longitude: null });
   // const fileInputRef = useRef(null);
   const profileInputRef = useRef(null);
   const galleryInputRef = useRef(null);
@@ -1311,47 +1311,29 @@ const MainApp = () => {
             const file = e.target.files[0];
             console.log('Uploading avatar:', file.name);
             console.log('Original file size:', (file.size / 1024 / 1024).toFixed(2) + ' MB');
-
+            
             try {
                 // Показываем пользователю что происходит сжатие
                 console.log('Сжимаем изображение...');
-
+                
                 const imageUrl = await userService.uploadAvatar(userId, file, userData?.image || null);
                 console.log('Avatar uploaded:', imageUrl);
-
-                // Сохраняем старую аватарку если она была
-                const oldAvatar = userData?.image;
-                const newGallery = oldAvatar && !userImages.includes(oldAvatar)
-                    ? [imageUrl, oldAvatar, ...userImages.filter(img => img !== imageUrl)]
-                    : [imageUrl, ...userImages.filter(img => img !== imageUrl)];
-
+                
                 // Обновляем состояние аватара
                 setUserData(prev => ({...prev, image: imageUrl}));
-
-                // Сохраняем в галерею через API
-                try {
-                    const token = localStorage.getItem('motomate_token');
-                    await fetch('/api/users/profile/images', {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${token}`,
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ url: imageUrl })
-                    });
-                    console.log('Avatar saved to gallery via API');
-                } catch (apiError) {
-                    console.error('Failed to save avatar to gallery via API:', apiError);
-                }
-
-                // Обновляем локальное состояние галереи
-                setUserImages(newGallery);
-                localStorage.setItem('userImages', JSON.stringify(newGallery));
-
+                
                 // Принудительно обновляем компонент для сброса кэша изображения
                 setTimeout(() => {
                     setUserData(prev => ({...prev}));
                 }, 100);
+                
+                // Добавляем аватар в галерею с задержкой
+                setTimeout(async () => {
+                    if (!userImages.includes(imageUrl)) {
+                        console.log('Adding avatar to gallery:', imageUrl);
+                        await updateGallery([imageUrl, ...userImages]);
+                    }
+                }, 500);
             } catch (uploadError) {
                 console.error('Avatar upload error:', uploadError);
                 alert('Avatar upload error: ' + JSON.stringify(uploadError));
@@ -1443,7 +1425,7 @@ const MainApp = () => {
         const eventData = {
           title: newEvent.title.trim(),
           description: newEvent.description?.trim() || null,
-          city: newEvent.city || userData.city,
+          city: userData.city,
           date: newEvent.date,
           time: newEvent.time,
           address: newEvent.address?.trim() || null,
@@ -1451,13 +1433,13 @@ const MainApp = () => {
           latitude: typeof newEvent.latitude === 'number' ? newEvent.latitude : null,
           longitude: typeof newEvent.longitude === 'number' ? newEvent.longitude : null,
         };
-
+        
         console.log('🚀 Вызываем eventService.createEvent с данными:', eventData);
         await eventService.createEvent(eventData);
-
-        setNewEvent({ title: '', description: '', date: '', time: '', address: '', link: '', city: '', latitude: null, longitude: null });
+        
+        setNewEvent({ title: '', description: '', date: '', time: '', address: '', link: '', latitude: null, longitude: null });
         setShowEventModal(false);
-
+        
         if (window.apiManager && window.apiManager.loadEvents) {
           window.apiManager.loadEvents();
         }
@@ -2155,14 +2137,8 @@ const MainApp = () => {
               <div className="px-4 mt-6 pb-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">События в вашем городе</h3>
-                <button
-                  onClick={() => {
-                    setNewEvent(prev => ({
-                      ...prev,
-                      city: userData?.city || ''
-                    }));
-                    setShowEventModal(true);
-                  }}
+                <button 
+                  onClick={() => setShowEventModal(true)}
                   className="bg-orange-600 w-8 h-8 rounded-full flex items-center justify-center active:scale-90"
                 >
                   <Plus size={16} />
@@ -2881,17 +2857,17 @@ const MainApp = () => {
             {/* ГАЛЕРЕЯ ФОТО */}
             <div className="w-full mb-6">
                 <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500 mb-4 ml-1">Галерея</h3>
-                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2 w-full">
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2 sm:gap-3 w-full">
                   {userImages.map((img, idx) => {
                     const isMainPhoto = userData?.image === img;
                     return (
-                      <div key={idx} className="aspect-square rounded-2xl overflow-hidden border border-white/10 relative group cursor-pointer" onClick={() => {
+                      <div key={idx} className="aspect-square rounded-lg sm:rounded-2xl overflow-hidden border border-white/10 relative group cursor-pointer" onClick={() => {
                     setSelectedImage(img);
                     setImageContext({ type: 'gallery', images: userImages, currentIndex: idx });
                   }}>
-                        <img src={img} className="w-full h-full object-cover" alt={`Photo ${idx + 1}`} />
+                        <img src={img} className="w-full h-full object-cover hover:scale-105 transition-transform" alt={`Photo ${idx + 1}`} />
                         {isMainPhoto && (
-                          <div className="absolute top-1 left-1 px-2 py-0.5 bg-orange-600 text-[8px] font-black uppercase rounded">Главное</div>
+                          <div className="absolute top-0.5 left-0.5 px-1.5 py-0.25 bg-orange-600 text-[7px] font-black uppercase rounded">Главное</div>
                         )}
                         <button
                           onClick={async (e) => {
@@ -2908,9 +2884,9 @@ const MainApp = () => {
                               }
                             }
                           }}
-                          className="absolute top-1 right-1 bg-red-600/90 hover:bg-red-600 rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-opacity active:scale-90"
+                          className="absolute top-0.5 right-0.5 bg-red-600/90 hover:bg-red-600 rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity active:scale-90"
                         >
-                          <X size={12} className="text-white" />
+                          <X size={10} className="text-white" />
                         </button>
                       </div>
                     );
@@ -2918,12 +2894,12 @@ const MainApp = () => {
                   <button
                     onClick={() => galleryInputRef.current?.click()}
                     disabled={isUploading}
-                    className="aspect-square rounded-2xl border-2 border-dashed border-white/20 flex items-center justify-center hover:border-white/40 transition-colors active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="aspect-square rounded-lg sm:rounded-2xl border-2 border-dashed border-white/20 flex items-center justify-center hover:border-white/40 transition-colors active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isUploading ? (
-                      <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                     ) : (
-                      <Plus size={20} className="text-zinc-600" />
+                      <Plus size={16} className="text-zinc-600" />
                     )}
                   </button>
                 </div>
@@ -3200,16 +3176,11 @@ const MainApp = () => {
                   </div>
                 </div>
               </div>
-              <button
+              <button 
                 onClick={async () => {
                   try {
                     if (!isRequiredProfileFilled(userData)) {
                       alert('Заполните обязательные поля: Имя, Возраст 18+, Город и Пол');
-                      return;
-                    }
-
-                    if (!userData.city || userData.city.trim().length < 2) {
-                      alert('Укажите город');
                       return;
                     }
 

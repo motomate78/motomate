@@ -20,18 +20,20 @@ export function CityAutocomplete({ value, onChange, placeholder = 'Введи с
 
     setLoading(true);
     try {
-      // Используем бэкенд прокси /api/geo/suggest (Яндекс Suggest API)
+      // Используем бэкенд прокси вместо прямого вызова Яндекса (избегаем CORS)
       const response = await fetch(
-        `/api/geo/suggest?text=${encodeURIComponent(query)}&results=10`
+        `/api/geo/suggest?text=${encodeURIComponent(query)}&type=geo&results=8&lang=ru_RU`
       );
 
       if (response.ok) {
         const data = await response.json();
+        // Берём текст напрямую из результатов Yandex API
         const results = (data?.results || [])
           .map((item) => String(item?.text || '').trim())
           .filter(Boolean)
           .filter((city, idx, arr) => arr.indexOf(city) === idx)
-          .slice(0, 10);
+          .slice(0, 8);
+        
         setSuggestions(results);
       } else {
         setSuggestions([]);
