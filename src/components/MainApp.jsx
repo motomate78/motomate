@@ -7,6 +7,7 @@ import { useGeolocation } from '../hooks/useGeolocation';
 import { useAddressSuggest } from '../hooks/useAddressSuggest';
 import { CityAutocomplete } from './CityAutocomplete';
 import { AddressAutocomplete } from './AddressAutocomplete';
+import PrivacySettings from './PrivacySettings';
 const EventsMap = React.lazy(() => import('./EventsMap'));
 
 const isValidAdultAge = (age) => Number.isInteger(age) && age >= 18;
@@ -2837,9 +2838,9 @@ const MainApp = () => {
             
             {/* ГАЛЕРЕЯ ФОТО */}
             {userImages.length > 0 && (
-              <div className="w-full max-w-md mb-6">
+              <div className="w-full mb-6">
                 <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500 mb-4 ml-1">Галерея</h3>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-3 gap-3 w-full">
                   {userImages.map((img, idx) => {
                     const isMainPhoto = userData?.image === img;
                     return (
@@ -3298,27 +3299,7 @@ const MainApp = () => {
                  </div>
                  
                  {/* GHOST MODE */}
-                 <div className="p-6 bg-white/5 rounded-[24px] border border-white/10 space-y-4">
-                   <h3 className="text-sm font-black uppercase tracking-widest text-zinc-500">Приватность</h3>
-                   <div className="flex items-center justify-between">
-                     <div>
-                       <div className="font-bold text-white text-sm">Режим инкогнито</div>
-                       <div className="text-[10px] text-zinc-500 mt-1">Скрыть мое местоположение на карте</div>
-                     </div>
-                     <button
-                       onClick={() => {
-                         const newValue = !userData?.is_private;
-                        setUserData((prev) => ({ ...prev, is_private: newValue }));
-                       }}
-                      aria-pressed={Boolean(userData?.is_private)}
-                       className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors duration-200 ${userData?.is_private ? 'bg-orange-600' : 'bg-zinc-600'}`}
-                     >
-                       <span
-                        className={`absolute left-0.5 h-6 w-6 transform rounded-full bg-white transition-transform duration-200 shadow-sm ${userData?.is_private ? 'translate-x-5' : 'translate-x-0'}`}
-                       />
-                     </button>
-                   </div>
-                 </div>
+                 <PrivacySettings userData={userData} setUserData={setUserData} />
 
                  <button onClick={handleDeleteAccount} disabled={isLoggingOut} className="w-full bg-red-500/10 border border-red-500/20 p-6 rounded-[24px] flex items-center justify-center gap-2 text-red-500 disabled:opacity-50 font-black uppercase tracking-widest active:scale-95 transition-all">
                     <Trash2 size={20} />

@@ -940,6 +940,105 @@ router.delete('/users/me', authenticateToken, async (req, res) => {
   }
 });
 
+// Image endpoints
+router.get('/users/profile/images', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const images = await prisma.image.findMany({
+      where: { user_id: userId },
+      orderBy: { order: 'asc' },
+      select: { id: true, url: true, is_main: true, created_at: true },
+    });
+    res.json({ images });
+  } catch (error) {
+    logError('users.profile.images.get', error, { userId: req.user?.userId });
+    res.status(500).json({ error: 'Failed to get images' });
+  }
+});
+
+router.post('/users/profile/images', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { imageData } = req.body;
+
+    if (!imageData) {
+      return res.status(400).json({ error: 'Missing imageData' });
+    }
+
+    // Parse base64 data URI
+    const matches = imageData.match(/^data:([^;]+);base64,(.+)$/);
+    if (!matches) {
+      return res.status(400).json({ error: 'Invalid image format' });
+    }
+
+    const [, mimeType, base64Data] = matches;
+    const buffer = Buffer.from(base64Data, 'base64');
+
+    // Validate file size (max 5MB)
+    if (buffer.length > 5 * 1024 * 1024) {
+      return res.status(400).json({ error: 'Image too large (max 5MB)' });
+    }
+
+    // Validate MIME type
+    const validMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!validMimeTypes.includes(mimeType)) {
+      return res.status(400).json({ error: 'Invalid image type' });
+    }
+
+    // Upload to S3
+    const timestamp = Date.now();
+    const fileName = `users/${userId}/images/${timestamp}.jpg`;
+    const imageUrl = await uploadToS3(buffer, fileName, mimeType);
+
+    // Save to database
+    const image = await prisma.image.create({
+      data: {
+        user_id: userId,
+        url: imageUrl,
+        order: 0, // Can be updated later
+      },
+      select: { id: true, url: true, is_main: true, created_at: true },
+    });
+
+    res.json({ image });
+  } catch (error) {
+    logError('users.profile.images.post', error, { userId: req.user?.userId });
+    res.status(500).json({ error: 'Failed to upload image' });
+  }
+});
+
+router.delete('/users/profile/images/:imageId', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { imageId } = req.params;
+
+    const image = await prisma.image.findUnique({
+      where: { id: imageId },
+    });
+
+    if (!image) {
+      return res.status(404).json({ error: 'Image not found' });
+    }
+
+    if (image.user_id !== userId) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    // Delete from S3
+    await deleteFromS3(image.url);
+
+    // Delete from database
+    await prisma.image.delete({
+      where: { id: imageId },
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    logError('users.profile.images.delete', error, { userId: req.user?.userId });
+    res.status(500).json({ error: 'Failed to delete image' });
+  }
+});
+
 router.get('/users', authenticateToken, async (req, res) => {
   try {
     const { city, gender, page = '1', limit = '20' } = req.query;
@@ -1138,8 +1237,11 @@ router.post('/likes', authenticateToken, likesLimiter, async (req, res) => {
           },
         });
 
+        let chatId = null;
         if (reciprocalLike) {
-          const chatId = [from_user_id, to_user_id].sort().join('_');
+          chatId = [from_user_id, to_user_id].sort().join('_');
+          
+          // Create or update Chat
           await tx.chat.upsert({
             where: { id: chatId },
             update: {},
@@ -1149,9 +1251,26 @@ router.post('/likes', authenticateToken, likesLimiter, async (req, res) => {
               participant_2_id: to_user_id,
             },
           });
+
+          // Create or update Match
+          const [user1, user2] = [from_user_id, to_user_id].sort();
+          await tx.match.upsert({
+            where: {
+              user_id_1_user_id_2: {
+                user_id_1: user1,
+                user_id_2: user2,
+              },
+            },
+            update: { chat_id: chatId },
+            create: {
+              user_id_1: user1,
+              user_id_2: user2,
+              chat_id: chatId,
+            },
+          });
         }
 
-        return { isMatch: !!reciprocalLike, chatId: reciprocalLike ? [from_user_id, to_user_id].sort().join('_') : null };
+        return { isMatch: !!reciprocalLike, chatId };
       });
 
       res.json({
@@ -1190,6 +1309,54 @@ router.get('/likes/matches', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Get matches error:', error);
     res.status(500).json({ error: 'Failed to get matches' });
+  }
+});
+
+// Geo Proxy Routes - to avoid CORS issues with Yandex API
+router.get('/geo/suggest', async (req, res) => {
+  try {
+    const { text, type = 'geo', results = 6, lang = 'ru_RU' } = req.query;
+    const apiKey = process.env.YANDEX_API_KEY;
+
+    if (!apiKey) {
+      return res.status(500).json({ error: 'Yandex API key not configured' });
+    }
+
+    if (!text || String(text).trim().length < 2) {
+      return res.json({ results: [] });
+    }
+
+    const yandexUrl = new URL('https://suggest-maps.yandex.ru/v1/suggest');
+    yandexUrl.searchParams.append('apikey', apiKey);
+    yandexUrl.searchParams.append('text', String(text));
+    yandexUrl.searchParams.append('type', String(type));
+    yandexUrl.searchParams.append('results', String(results));
+    yandexUrl.searchParams.append('lang', String(lang));
+
+    const response = await fetch(yandexUrl.toString());
+    
+    if (!response.ok) {
+      return res.status(response.status).json({ error: 'Yandex API error' });
+    }
+
+    const data = await response.json();
+    
+    // Normalize response
+    const normalized = (data.results || []).map((item) => {
+      const title = item.title?.text || item.title || '';
+      const subtitle = item.subtitle?.text || item.subtitle || '';
+      const displayText = [title, subtitle].filter(Boolean).join(', ') || item.text || '';
+      const point = item?.tags?.point || item?.point;
+      const coords = point && typeof point === 'object'
+        ? { latitude: Number(point.lat), longitude: Number(point.lon) }
+        : null;
+      return { text: displayText, coords };
+    }).filter((item) => item.text);
+
+    res.json({ results: normalized });
+  } catch (error) {
+    logError('geo.suggest', error);
+    res.status(500).json({ error: 'Failed to fetch suggestions' });
   }
 });
 

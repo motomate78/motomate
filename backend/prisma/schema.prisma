@@ -41,6 +41,7 @@ model User {
   updated_at           DateTime @updatedAt
 
   // Relations
+  images               Image[]
   sentLikes            Like[]   @relation("UserSentLikes")
   receivedLikes        Like[]   @relation("UserReceivedLikes")
   chats1               Chat[]   @relation("ChatParticipant1")
@@ -48,6 +49,8 @@ model User {
   sentMessages         Message[] @relation("MessageSender")
   createdEvents        Event[]  @relation("EventCreator")
   pushSubscriptions    PushSubscription[]
+  matches1             Match[]  @relation("User1")
+  matches2             Match[]  @relation("User2")
 
   @@map("users")
 }
@@ -137,4 +140,37 @@ model Event {
   createdBy User @relation("EventCreator", fields: [created_by_id], references: [id], onDelete: Cascade)
 
   @@map("events")
+}
+
+model Image {
+  id        String   @id @default(cuid())
+  user_id   String
+  url       String
+  is_main   Boolean  @default(false)
+  order     Int      @default(0)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Relations
+  user      User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@map("images")
+}
+
+model Match {
+  id               String   @id @default(cuid())
+  user_id_1        String
+  user_id_2        String
+  chat_id          String?
+  created_at       DateTime @default(now())
+
+  // Relations
+  user1            User     @relation("User1", fields: [user_id_1], references: [id], onDelete: Cascade)
+  user2            User     @relation("User2", fields: [user_id_2], references: [id], onDelete: Cascade)
+
+  @@index([user_id_1])
+  @@index([user_id_2])
+  @@unique([user_id_1, user_id_2])
+  @@map("matches")
 }
