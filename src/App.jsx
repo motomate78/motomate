@@ -6,18 +6,38 @@ import { Mail, Phone, MessageCircle, Send, FileText, ShieldCheck } from 'lucide-
 
 import { apiClient } from './apiClient';
 
-// Обработка ChunkLoadError для принудительной перезагрузки
+// Обработка ChunkLoadError для принудительной перезагрузки с очисткой кэша
+const forceReload = () => {
+  console.warn('Forcing hard reload to clear cache');
+  // Очищаем все кэши
+  if ('caches' in window) {
+    caches.keys().then(cacheNames => {
+      cacheNames.forEach(cacheName => {
+        caches.delete(cacheName);
+      });
+    });
+  }
+  // Перезагружаем с принудительной очисткой кэша
+  window.location.reload(true);
+};
+
 window.addEventListener('error', (event) => {
-  if (event.message && event.message.includes('Loading chunk')) {
-    console.warn('Chunk load error detected, forcing reload');
-    window.location.reload(true);
+  const errorMsg = event.message || '';
+  if (errorMsg.includes('Loading chunk') ||
+      errorMsg.includes('Failed to fetch dynamically imported') ||
+      errorMsg.includes('dynamically imported module')) {
+    console.warn('Chunk load error detected:', errorMsg);
+    forceReload();
   }
 });
 
 window.addEventListener('unhandledrejection', (event) => {
-  if (event.reason && event.reason.message && event.reason.message.includes('Loading chunk')) {
-    console.warn('Chunk load error in promise, forcing reload');
-    window.location.reload(true);
+  const errorMsg = event.reason?.message || event.reason || '';
+  if (errorMsg.includes('Loading chunk') ||
+      errorMsg.includes('Failed to fetch dynamically imported') ||
+      errorMsg.includes('dynamically imported module')) {
+    console.warn('Chunk load error in promise:', errorMsg);
+    forceReload();
   }
 });
 
