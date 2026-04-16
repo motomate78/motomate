@@ -95,14 +95,22 @@ log_success "Node.js $(node --version) installed"
 log_info "Step 5: Setting up repository..."
 
 REPO_DIR="/home/$DEPLOY_USER/motomate"
-REPO_URL="${1:-https://github.com/your-username/motomate.git}"
+
+# Use provided argument or prompt user
+if [ -z "$1" ]; then
+    log_warning "Repository URL not provided via argument"
+    log_info "Usage: sudo bash deploy-yandex.sh https://github.com/your-user/motomate.git"
+    read -p "Enter Repository URL: " REPO_URL
+    
+    if [ -z "$REPO_URL" ]; then
+        log_error "Repository URL cannot be empty"
+    fi
+else
+    REPO_URL="$1"
+    log_info "Using provided repository: $REPO_URL"
+fi
 
 if [ ! -d "$REPO_DIR" ]; then
-    log_warning "Provide GitHub repository URL (or using default):"
-    log_info "Usage: sudo bash deploy-yandex.sh https://github.com/your-user/motomate.git"
-    
-    read -p "Repository URL: " REPO_URL
-    
     git clone "$REPO_URL" "$REPO_DIR"
 else
     cd "$REPO_DIR"
