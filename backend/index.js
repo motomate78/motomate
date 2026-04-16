@@ -714,6 +714,7 @@ router.get('/users/:id', authenticateToken, async (req, res) => {
         name: true,
         age: true,
         city: true,
+        address: true,
         bike: true,
         gender: true,
         has_bike: true,
