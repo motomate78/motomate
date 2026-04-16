@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
  * Autocomplete компонент для выбора города через Yandex Suggest API
  * Ищет реальные города в реальном времени
  */
-export function CityAutocomplete({ value, onChange, placeholder = 'Введи свой город...', yandexMapsKey = '' }) {
+export function CityAutocomplete({ value, onChange, placeholder = 'Введи свой город...' }) {
   const [isOpen, setIsOpen] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -20,44 +20,22 @@ export function CityAutocomplete({ value, onChange, placeholder = 'Введи с
 
     setLoading(true);
     try {
-      let results = [];
-      const apiKey = String(yandexMapsKey || import.meta.env.VITE_YANDEX_API_KEY || '').trim();
-      if (apiKey) {
-        const response = await fetch(
-          `https://suggest-maps.yandex.ru/v1/suggest?apikey=${apiKey}&text=${encodeURIComponent(query)}&type=geo&results=8&lang=ru_RU`
-        );
+      // Используем бэкенд прокси вместо прямого вызова Яндекса (избегаем CORS)
+      const response = await fetch(
+        `/api/geo/suggest?text=${encodeURIComponent(query)}&type=geo&results=8&lang=ru_RU`
+      );
 
-        if (response.ok) {
-          const data = await response.json();
-          results = (data?.results || [])
-            .map((item) => {
-              const title = item?.title?.text || item?.title || '';
-              const subtitle = item?.subtitle?.text || item?.subtitle || '';
-              return [title, subtitle].filter(Boolean).join(', ');
-            })
-            .map((city) => String(city || '').split(',')[0].trim())
-            .filter(Boolean)
-            .filter((city, idx, arr) => arr.indexOf(city) === idx)
-            .slice(0, 8);
-        }
+      if (response.ok) {
+        const data = await response.json();
+        const results = (data?.results || [])
+          .map((item) => String(item?.text || '').split(',')[0].trim())
+          .filter(Boolean)
+          .filter((city, idx, arr) => arr.indexOf(city) === idx)
+          .slice(0, 8);
+        setSuggestions(results);
+      } else {
+        setSuggestions([]);
       }
-
-      if (results.length === 0) {
-        const osmResponse = await fetch(
-          `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&addressdetails=1&accept-language=ru&q=${encodeURIComponent(query)}`
-        );
-        if (osmResponse.ok) {
-          const osmData = await osmResponse.json();
-          results = (Array.isArray(osmData) ? osmData : [])
-            .map((item) => item?.address?.city || item?.address?.town || item?.address?.village || item?.address?.state || item?.name || item?.display_name)
-            .map((city) => String(city || '').split(',')[0].trim())
-            .filter(Boolean)
-            .filter((city, idx, arr) => arr.indexOf(city) === idx)
-            .slice(0, 8);
-        }
-      }
-
-      setSuggestions(results);
     } catch (error) {
       console.error('Error fetching cities:', error);
       setSuggestions([]);
