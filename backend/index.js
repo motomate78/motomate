@@ -1381,36 +1381,44 @@ router.get('/likes/sent', authenticateToken, async (req, res) => {
 router.get('/geo/suggest', async (req, res) => {
   try {
     const { text } = req.query;
-    if (!text) return res.json([]);
+    if (!text || text.length < 2) return res.json([]);
 
     console.log('[geo/suggest] Поиск города для:', text);
 
-    const apiKey = process.env.YANDEX_API_KEY || process.env.VITE_YANDEX_API_KEY || 'a6c357be-b68a-4dd4-ba13-21d17b70646e';
-    // Используем URLSearchParams для безопасной сборки строки
-    const params = new URLSearchParams({
-      apikey: apiKey,
-      text: text,
-      types: 'locality',
-      results: '10',
-      lang: 'ru_RU'
+    // Используем Nominatim (OpenStreetMap) вместо Яндекс Suggest API
+    // Яндекс Suggest API требует специальный ключ и возвращает 403
+    const nominatimUrl = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=10&addressdetails=1&accept-language=ru&q=${encodeURIComponent(text)}`;
+
+    console.log('[geo/suggest] Fetching:', nominatimUrl);
+
+    const response = await axios.get(nominatimUrl, {
+      timeout: 10000,
+      headers: {
+        'User-Agent': 'MotoMate/1.0'
+      }
     });
 
-    const yandexUrl = `https://suggest-maps.yandex.ru/v1/suggest?${params.toString()}`;
+    console.log('[geo/suggest] Nominatim response status:', response.status);
 
-    console.log('[geo/suggest] Fetching:', yandexUrl);
+    // Нормализуем ответ для фронтенда
+    const results = (response.data || []).map((item) => {
+      const city = item.address?.city || item.address?.town || item.address?.village || item.name || '';
+      const region = item.address?.state || item.address?.region || '';
+      const displayText = [city, region].filter(Boolean).join(', ') || item.display_name || '';
+      const coords = item.lat && item.lon ? {
+        latitude: Number(item.lat),
+        longitude: Number(item.lon)
+      } : null;
+      return { text: displayText, coords };
+    }).filter((item) => item.text);
 
-    const response = await axios.get(yandexUrl, { timeout: 10000 });
-
-    console.log('[geo/suggest] Yandex response status:', response.status);
-
-    // Возвращаем только нужные данные фронтенду
-    res.json(response.data.results || []);
+    console.log('[geo/suggest] Normalized results:', results.length);
+    res.json(results);
 
   } catch (error) {
     console.error('[geo/suggest] ОШИБКА ГЕО-ПРОКСИ:', error.message);
-    // Отправляем детали ошибки на фронт, чтобы мы видели их в консоли браузера!
     res.status(500).json({
-      error: 'Ошибка сервера при запросе к Яндексу',
+      error: 'Ошибка сервера при поиске города',
       details: error.message
     });
   }
