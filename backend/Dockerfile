@@ -8,6 +8,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+RUN npx prisma generate
 EXPOSE 3001
 CMD ["node", "index.js"]
 
