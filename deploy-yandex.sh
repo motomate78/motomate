@@ -96,25 +96,29 @@ log_info "Step 5: Setting up repository..."
 
 REPO_DIR="/home/$DEPLOY_USER/motomate"
 
-# Use provided argument or prompt user
-if [ -z "$1" ]; then
-    log_warning "Repository URL not provided via argument"
-    log_info "Usage: sudo bash deploy-yandex.sh https://github.com/your-user/motomate.git"
-    read -p "Enter Repository URL: " REPO_URL
+# Get repository URL from argument or interactive input
+if [ -n "$1" ]; then
+    REPO_URL="$1"
+    log_info "Using repository: $REPO_URL"
+else
+    log_info "No repository URL provided via argument"
+    log_warning "Usage: curl -fsSL https://raw.githubusercontent.com/motomate78/motomate/main/deploy-yandex.sh | sudo bash -s https://github.com/motomate78/motomate.git"
+    log_warning "Or directly: sudo bash deploy-yandex.sh https://github.com/motomate78/motomate.git"
+    echo ""
+    read -p "Enter GitHub repository URL (e.g., https://github.com/motomate78/motomate.git): " REPO_URL
     
     if [ -z "$REPO_URL" ]; then
         log_error "Repository URL cannot be empty"
     fi
-else
-    REPO_URL="$1"
-    log_info "Using provided repository: $REPO_URL"
 fi
 
 if [ ! -d "$REPO_DIR" ]; then
-    git clone "$REPO_URL" "$REPO_DIR"
+    log_info "Cloning repository..."
+    git clone "$REPO_URL" "$REPO_DIR" || log_error "Failed to clone repository. Check the URL: $REPO_URL"
 else
+    log_info "Repository directory exists, pulling latest changes..."
     cd "$REPO_DIR"
-    git pull
+    git pull || log_warning "Failed to pull latest changes"
 fi
 
 cd "$REPO_DIR"
