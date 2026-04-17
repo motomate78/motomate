@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, Suspense } from 'react';
-import { Search, Heart, MapPin, MessageCircle, User, X, Gauge, Music, Shield, Target, Edit3, Settings, LogOut, ChevronLeft, ChevronRight, ChevronDown, MessageSquare, Send, Camera, Navigation, Zap, Trash2, Ban, Image as ImageIcon, Plus, Calendar, Clock, MapPin as MapPinIcon, Smile, Database, Loader2, Check, CheckCheck, Info, ArrowRight, Maximize2, Minimize2 } from 'lucide-react';
+import { Search, Heart, MapPin, MessageCircle, User, X, Gauge, Music, Shield, Target, Edit3, Settings, LogOut, ChevronLeft, ChevronRight, ChevronDown, MessageSquare, Send, Camera, Navigation, Zap, Trash2, Ban, Image as ImageIcon, Plus, Calendar, Clock, MapPin as MapPinIcon, Smile, Database, Loader2, Check, CheckCheck, Info, ArrowRight } from 'lucide-react';
 import ApiManager from './ApiManager';
 import { apiClient } from '../apiClient';
 import { userService, eventService, groupChatService, compressImage } from '../apiService';
@@ -152,7 +152,6 @@ const MainApp = () => {
   // const [isNewUser, setIsNewUser] = useState(false);
   const [showWelcomeModal, setShowWelcomeModal] = useState(false);
   const [userLocation, setUserLocation] = useState(null);
-  const [isMapFullscreen, setIsMapFullscreen] = useState(false);
   const DEFAULT_AVATAR = "https://cdn-icons-png.flaticon.com/512/149/149071.png";
 
   const formatEventDate = (value) => {
@@ -2116,57 +2115,27 @@ const MainApp = () => {
         {activeTab === 'map' && (
           <div className="h-full overflow-y-auto bg-black animate-in fade-in">
             {/* КАРТА */}
-            <div className={`relative bg-[#0a0a0a] ${isMapFullscreen ? 'fixed inset-0 z-50' : 'mx-4 mt-4 rounded-[32px]'} border border-white/10 overflow-hidden`} style={{ height: isMapFullscreen ? '100vh' : '40vh', minHeight: isMapFullscreen ? '100vh' : '300px' }}>
+            <div className="relative bg-[#0a0a0a] mx-4 mt-4 rounded-[32px] border border-white/10 overflow-hidden" style={{ height: '40vh', minHeight: '300px' }}>
               {userData && (
-                <>
-                  {isMapFullscreen && (
-                    <div className="absolute inset-0 pointer-events-none z-[999]">
-                      <div className="absolute inset-0 bg-gradient-to-b from-transparent to-black/40" />
-                      <button
-                        onClick={() => setIsMapFullscreen(false)}
-                        className="absolute top-6 right-6 z-[1000] bg-black/80 backdrop-blur-xl border border-white/10 p-3 rounded-full text-white hover:bg-white/20 transition-colors pointer-events-auto"
-                      >
-                        <Minimize2 size={24} />
-                      </button>
-                      <div className="absolute bottom-6 left-6 right-6 flex justify-center pointer-events-auto">
-                        <button
-                          onClick={() => setIsMapFullscreen(false)}
-                          className="bg-black/80 backdrop-blur-xl border border-white/10 px-6 py-3 rounded-full text-white font-black uppercase text-sm hover:bg-white/20 transition-colors"
-                        >
-                          Закрыть карту
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  <Suspense fallback={<div className="w-full h-full flex items-center justify-center bg-black/20"><Loader2 size={32} className="text-orange-500 animate-spin" /></div>}>
-                    <EventsMap
-                      userData={mapUserData}
-                      bikers={cityBikers}
-                      events={cityEvents}
-                    />
-                  </Suspense>
-                </>
+                <Suspense fallback={<div className="w-full h-full flex items-center justify-center bg-black/20"><Loader2 size={32} className="text-orange-500 animate-spin" /></div>}>
+                  <EventsMap
+                    userData={mapUserData}
+                    bikers={cityBikers}
+                    events={cityEvents}
+                  />
+                </Suspense>
               )}
-            </div>
-
-            {/* БАЙКЕРЫ РЯДОМ - под картой */}
-            {!isMapFullscreen && (
-              <div className="mx-4 mt-4 bg-black/80 backdrop-blur-xl border border-white/10 p-4 rounded-[24px] flex items-center gap-3">
-                <Navigation className="text-orange-500" size={18} />
-                <div className="flex-1">
-                  <p className="text-xs font-black uppercase italic text-white">Байкеры рядом</p>
-                  <p className="text-[10px] text-zinc-500 uppercase">В сети: {cityBikers.length}</p>
+              {/* БАЙКЕРЫ РЯДОМ - отцентрировано внутри карты */}
+              <div className="absolute bottom-0 left-0 right-0 flex justify-center pb-6">
+                <div className="bg-black/80 backdrop-blur-xl border border-white/10 px-6 py-3 rounded-full flex items-center gap-3">
+                  <Navigation className="text-orange-500" size={16} />
+                  <div className="text-center">
+                    <p className="text-xs font-black uppercase italic text-white">Байкеры рядом</p>
+                    <p className="text-[10px] text-zinc-500 uppercase">В сети: {cityBikers.length}</p>
+                  </div>
                 </div>
-                <button
-                  onClick={() => setIsMapFullscreen(true)}
-                  className="bg-orange-600 p-2 rounded-full text-white hover:bg-orange-700 transition-colors"
-                  title="Открыть на полный экран"
-                >
-                  <Maximize2 size={16} />
-                </button>
               </div>
-            )}
+            </div>
 
             {/* СЕКЦИЯ СОБЫТИЙ - только не в полноэкранном режиме */}
             {!isMapFullscreen && (
@@ -3417,17 +3386,17 @@ const MainApp = () => {
 
         {/* МОДАЛЬНОЕ ОКНО СОЗДАНИЯ СОБЫТИЯ */}
         {showEventModal && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center px-6">
+          <div className="fixed inset-0 z-[200] flex items-center justify-center px-6 py-6">
             <div className="absolute inset-0 bg-black/70 backdrop-blur-md" onClick={() => setShowEventModal(false)} />
-            <div className="relative w-full max-w-md bg-[#1c1c1e]/95 border border-white/10 rounded-[32px] shadow-2xl backdrop-blur-2xl flex flex-col max-h-[90vh]">
-              <div className="flex items-center justify-between p-8 pb-4 border-b border-white/10 flex-shrink-0">
+            <div className="relative w-full max-w-md bg-[#1c1c1e]/95 border border-white/10 rounded-[32px] shadow-2xl backdrop-blur-2xl flex flex-col max-h-[90vh] overflow-hidden">
+              <div className="flex items-center justify-between px-8 py-6 border-b border-white/10 flex-shrink-0">
                 <h2 className="text-xl font-black uppercase italic">Создать событие</h2>
                 <button onClick={() => setShowEventModal(false)} className="p-2 bg-white/5 rounded-xl hover:bg-white/10 transition-colors">
                   <X size={20} />
                 </button>
               </div>
               <div className="overflow-y-auto flex-1">
-              <div className="space-y-4 p-8">
+              <div className="space-y-4 px-8 py-6">
                 <div>
                   <label className="block text-[10px] font-black text-zinc-500 mb-1.5 ml-1 uppercase tracking-widest">Название *</label>
                   <input 
