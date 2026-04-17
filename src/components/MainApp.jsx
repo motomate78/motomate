@@ -573,18 +573,25 @@ const MainApp = () => {
                       });
                       if (imagesRes.ok) {
                         const imagesData = await imagesRes.json();
-                        // imagesData теперь просто массив, не { images: ... }
-                        const imageUrls = (Array.isArray(imagesData) ? imagesData : []).map(img => img.url);
+                        // imagesData теперь просто массив объектов с id, url, is_main, created_at
                         
-                        // Сортируем так, чтобы текущая аватарка была первой
-                        let sortedImages = imageUrls;
-                        if (user.image && imageUrls.includes(user.image)) {
-                          // Текущая аватарка в начало, остальные после
-                          sortedImages = [user.image, ...imageUrls.filter(img => img !== user.image)];
+                        // Сортируем так, чтобы текущая аватарка была первой, остальные по дате загрузки (новые первыми)
+                        let sortedImages = imagesData;
+                        if (user.image && imagesData.length > 0) {
+                          // Найдем текущую аватарку
+                          const currentAvatar = imagesData.find(img => img.url === user.image);
+                          // Остальные фотки отсортируем по created_at (новые первыми)
+                          const otherImages = imagesData
+                            .filter(img => img.url !== user.image)
+                            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                          // Собираем: текущая аватарка + остальные по дате
+                          sortedImages = currentAvatar ? [currentAvatar, ...otherImages] : imagesData;
                         }
                         
-                        setUserImages(sortedImages);
-                        localStorage.setItem('userImages', JSON.stringify(sortedImages));
+                        // Берем только URL'ы для userImages state
+                        const imageUrls = sortedImages.map(img => img.url);
+                        setUserImages(imageUrls);
+                        localStorage.setItem('userImages', JSON.stringify(imageUrls));
                       } else {
                         setUserImages([]);
                         localStorage.setItem('userImages', JSON.stringify([]));

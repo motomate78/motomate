@@ -939,7 +939,7 @@ router.get('/users/profile/images', authenticateToken, async (req, res) => {
     const userId = req.user.userId;
     const images = await prisma.image.findMany({
       where: { user_id: userId },
-      orderBy: { order: 'asc' },
+      orderBy: { created_at: 'desc' },
       select: { id: true, url: true, is_main: true, created_at: true },
     });
     res.json(images); // Возвращаем просто массив, не { images: ... }
