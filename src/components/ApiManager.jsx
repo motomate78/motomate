@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { apiClient } from '../apiClient';
+import { eventService } from '../apiService';
 import { Gauge, Music, Shield, Target } from 'lucide-react';
 import { io as socketIo } from 'socket.io-client';
 
@@ -220,7 +221,7 @@ const ApiManager = ({ userData, onUsersLoaded, onChatsLoaded, onEventsLoaded }) 
       // Load user's participations
       const participationPromises = futureEvents.map(async (event) => {
         try {
-          const isParticipant = await apiClient.isEventParticipant(event.id);
+          const isParticipant = await eventService.isEventParticipant(event.id);
           return { eventId: event.id, isParticipant: !!isParticipant };
         } catch (error) {
           console.error('Error checking participation for event:', event.id, error);

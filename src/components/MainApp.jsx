@@ -2169,14 +2169,14 @@ const MainApp = () => {
                   const handleParticipation = async () => {
                     try {
                       if (isParticipating) {
-                        await apiClient.leaveEvent(event.id);
+                        await eventService.leaveEvent(event.id);
                         setMyEventParticipations(prev => {
                           const next = new Set(prev);
                           next.delete(event.id);
                           return next;
                         });
                       } else {
-                        await apiClient.joinEvent(event.id);
+                        await eventService.joinEvent(event.id);
                         setMyEventParticipations(prev => new Set(prev).add(event.id));
                       }
                       // Reload events to update participant count

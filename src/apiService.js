@@ -254,6 +254,36 @@ export const eventService = {
     } catch (error) {
       throw error;
     }
+  },
+
+  // Присоединение к событию
+  async joinEvent(eventId) {
+    try {
+      const data = await apiClient.joinEvent(eventId);
+      return data;
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  // Покинуть событие
+  async leaveEvent(eventId) {
+    try {
+      const data = await apiClient.leaveEvent(eventId);
+      return data;
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  // Проверка участия в событии
+  async isEventParticipant(eventId) {
+    try {
+      const data = await apiClient.isEventParticipant(eventId);
+      return data;
+    } catch (error) {
+      throw error;
+    }
   }
 };
 
