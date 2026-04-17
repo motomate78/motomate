@@ -2881,7 +2881,7 @@ const MainApp = () => {
             
             {/* ГАЛЕРЕЯ ФОТО */}
             <div className="w-full mb-6">
-                <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500 mb-4 ml-1 text-center sm:text-left">Галерея</h3>
+                <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500 mb-4 text-center">Галерея</h3>
                 <div className="flex flex-wrap justify-center gap-3 w-full max-w-4xl mx-auto">
                   {userImages.map((img, idx) => {
                     const isMainPhoto = userData?.image === img;
