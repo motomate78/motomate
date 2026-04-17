@@ -575,8 +575,16 @@ const MainApp = () => {
                         const imagesData = await imagesRes.json();
                         // imagesData теперь просто массив, не { images: ... }
                         const imageUrls = (Array.isArray(imagesData) ? imagesData : []).map(img => img.url);
-                        setUserImages(imageUrls);
-                        localStorage.setItem('userImages', JSON.stringify(imageUrls));
+                        
+                        // Сортируем так, чтобы текущая аватарка была первой
+                        let sortedImages = imageUrls;
+                        if (user.image && imageUrls.includes(user.image)) {
+                          // Текущая аватарка в начало, остальные после
+                          sortedImages = [user.image, ...imageUrls.filter(img => img !== user.image)];
+                        }
+                        
+                        setUserImages(sortedImages);
+                        localStorage.setItem('userImages', JSON.stringify(sortedImages));
                       } else {
                         setUserImages([]);
                         localStorage.setItem('userImages', JSON.stringify([]));
