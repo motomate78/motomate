@@ -2137,9 +2137,8 @@ const MainApp = () => {
               </div>
             </div>
 
-            {/* СЕКЦИЯ СОБЫТИЙ - только не в полноэкранном режиме */}
-            {!isMapFullscreen && (
-              <div className="px-4 mt-6 pb-6">
+            {/* СЕКЦИЯ СОБЫТИЙ */}
+            <div className="px-4 mt-6 pb-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">События в вашем городе</h3>
                 <button 
@@ -2250,8 +2249,7 @@ const MainApp = () => {
                   </div>
                 )}
               </div>
-              </div>
-            )}
+            </div>
           </div>
         )}
 
