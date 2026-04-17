@@ -1920,7 +1920,7 @@ const MainApp = () => {
       )}
       
       {!selectedChat && !viewingProfile && (
-        <header className="sticky top-0 z-50 h-16 min-h-16 shrink-0 backdrop-blur-xl bg-black/90 border-b border-white/5 flex items-center justify-between px-6">
+        <header className="top-0 z-50 h-16 min-h-16 shrink-0 backdrop-blur-xl bg-black/90 border-b border-white/5 flex items-center justify-between px-6">
           <div className="text-lg font-black tracking-tighter italic uppercase">Мото<span className="text-orange-500">Знакомства</span></div>
           <button onClick={() => {setActiveTab('profile');}} className={`w-9 h-9 rounded-full border transition-all flex items-center justify-center overflow-hidden ${activeTab === 'profile' ? 'border-orange-500 bg-orange-500/10' : 'border-white/10 bg-white/5'}`}>
             {userData?.image ? (
