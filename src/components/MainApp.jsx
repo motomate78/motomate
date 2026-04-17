@@ -1319,7 +1319,7 @@ const MainApp = () => {
                     setUserData(prev => ({...prev}));
                 }, 100);
                 
-                // Добавляем новую аватарку в галерею
+                // Добавляем новую аватарку в начало галереи
                 setUserImages(prevImages => {
                   if (!prevImages.includes(imageUrl)) {
                     const updated = [imageUrl, ...prevImages];
@@ -1361,8 +1361,8 @@ const MainApp = () => {
                 const imageUrl = await userService.uploadGalleryImage(userId, file);
                 console.log('Gallery image uploaded:', imageUrl);
                 
-                // Добавляем фото в галерею
-                await updateGallery([...userImages, imageUrl]);
+                // Добавляем фото в начало галереи
+                await updateGallery([imageUrl, ...userImages]);
             } catch (uploadError) {
                 console.error('Gallery upload error:', uploadError);
                 alert('Gallery upload error: ' + JSON.stringify(uploadError));
@@ -2830,9 +2830,21 @@ const MainApp = () => {
                 </div>
             ) : (
             <>
+            <input 
+              type="file" 
+              ref={profileInputRef}
+              accept="image/*"
+              onChange={(e) => handleImageUpload(e, true)}
+              className="hidden"
+            />
             <div className="relative mb-8">
               <button 
-                onClick={() => profileInputRef.current?.click()}
+                onClick={() => {
+                  if (userData?.image) {
+                    setSelectedImage(userData.image);
+                    setImageContext({ type: 'avatar', images: [userData.image], currentIndex: 0 });
+                  }
+                }}
                 className="w-32 h-32 rounded-[44px] bg-gradient-to-tr from-orange-600 to-yellow-500 p-1 cursor-pointer hover:opacity-90 transition-opacity active:scale-95"
               >
                 <div className="w-full h-full rounded-[42px] bg-zinc-900 flex items-center justify-center overflow-hidden border-4 border-black">
