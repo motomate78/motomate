@@ -3478,7 +3478,7 @@ const MainApp = () => {
                         type="date"
                         value={newEvent.date}
                         onChange={(e) => setNewEvent({...newEvent, date: e.target.value})}
-                        min={new Date().toISOString().split('T')[0]}
+                        min={new Date().toLocaleDateString('en-CA')}
                         className="flex-1 bg-transparent text-sm outline-none text-white placeholder-zinc-500"
                       />
                     </div>
