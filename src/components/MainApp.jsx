@@ -1308,10 +1308,7 @@ const MainApp = () => {
                 // Показываем пользователю что происходит сжатие
                 console.log('Сжимаем изображение...');
                 
-                // Сохраняем старый аватар ПЕРЕД загрузкой нового
-                const oldAvatarUrl = userData?.image;
-                
-                const imageUrl = await userService.uploadAvatar(userId, file, null); // Передаем null, чтобы НЕ удалять старый из S3
+                const imageUrl = await userService.uploadAvatar(userId, file, null);
                 console.log('Avatar uploaded:', imageUrl);
                 
                 // Обновляем состояние аватара
@@ -1322,34 +1319,7 @@ const MainApp = () => {
                     setUserData(prev => ({...prev}));
                 }, 100);
                 
-                // Добавляем старый аватар в галерею, если он был
-                if (oldAvatarUrl) {
-                    setUserImages(prevImages => {
-                      if (!prevImages.includes(oldAvatarUrl)) {
-                        const updated = [oldAvatarUrl, ...prevImages];
-                        localStorage.setItem('userImages', JSON.stringify(updated));
-                        return updated;
-                      }
-                      return prevImages;
-                    });
-                    
-                    // Также сохраняем метаданные старого аватара в БД как обычное фото галереи
-                    try {
-                      const token = localStorage.getItem('motomate_token');
-                      await fetch('/api/users/profile/images', {
-                        method: 'POST',
-                        headers: {
-                          'Authorization': `Bearer ${token}`,
-                          'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ url: oldAvatarUrl })
-                      });
-                    } catch (dbErr) {
-                      console.warn('Failed to save old avatar metadata to gallery db:', dbErr);
-                    }
-                }
-                
-                // Новый аватар тоже добавляем в галерею
+                // Добавляем новую аватарку в галерею
                 setUserImages(prevImages => {
                   if (!prevImages.includes(imageUrl)) {
                     const updated = [imageUrl, ...prevImages];
@@ -1358,6 +1328,21 @@ const MainApp = () => {
                   }
                   return prevImages;
                 });
+                
+                // Сохраняем метаданные аватарки в БД как фото галереи
+                try {
+                  const token = localStorage.getItem('motomate_token');
+                  await fetch('/api/users/profile/images', {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': `Bearer ${token}`,
+                      'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ url: imageUrl })
+                  });
+                } catch (dbErr) {
+                  console.warn('Failed to save avatar to gallery db:', dbErr);
+                }
             } catch (uploadError) {
                 console.error('Avatar upload error:', uploadError);
                 alert('Avatar upload error: ' + JSON.stringify(uploadError));
@@ -2863,7 +2848,7 @@ const MainApp = () => {
                   )}
                 </div>
               </button>
-              <button onClick={() => setShowSettings(true)} data-edit-profile="true" className="absolute bottom-0 right-0 bg-orange-600 p-3 rounded-2xl border-4 border-black text-white transition-transform active:scale-90"><Edit3 size={18} /></button>
+              <button onClick={() => profileInputRef.current?.click()} className="absolute bottom-0 right-0 bg-orange-600 p-3 rounded-2xl border-4 border-black text-white transition-transform active:scale-90"><Edit3 size={18} /></button>
             </div>
             <h2 className="text-2xl font-black uppercase italic mb-2 flex items-center gap-2">
               {userData.name}
