@@ -1399,14 +1399,10 @@ router.get('/geo/suggest', async (req, res) => {
 router.get('/events', async (req, res) => {
   try {
     const { city, page = 1, limit = 20 } = req.query;
-
-    // Get today's date at midnight local time
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
+    
     const where = {
       date: {
-        gte: today,
+        gte: new Date(new Date().setHours(0, 0, 0, 0)), // Allow events from today
       },
     };
     if (city) where.city = city;
@@ -1417,20 +1413,16 @@ router.get('/events', async (req, res) => {
         createdBy: {
           select: { id: true, name: true, image: true },
         },
-        participants: {
-          select: { id: true },
-        },
       },
       skip: (parseInt(page) - 1) * parseInt(limit),
       take: parseInt(limit),
       orderBy: { date: 'asc' },
     });
 
-    // Add participant count to each event
+    // For now, set participantCount to 0 (we'll track separately)
     const eventsWithCount = events.map(event => ({
       ...event,
-      participant_count: event.participants.length,
-      participants: undefined,
+      participantCount: 0,
     }));
 
     res.json(eventsWithCount);

@@ -139,7 +139,7 @@ model Event {
 
   // Relations
   createdBy       User                @relation("EventCreator", fields: [created_by_id], references: [id], onDelete: Cascade)
-  participants    EventParticipant[]  @relation("EventParticipants")
+  participants    EventParticipant[]
 
   @@map("events")
 }
@@ -151,7 +151,7 @@ model EventParticipant {
   joined_at DateTime @default(now())
 
   // Relations
-  event Event @relation("EventParticipants", fields: [event_id], references: [id], onDelete: Cascade)
+  event Event @relation(fields: [event_id], references: [id], onDelete: Cascade)
   user  User  @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@unique([event_id, user_id])
