@@ -204,18 +204,39 @@ const ApiManager = ({ userData, onUsersLoaded, onChatsLoaded, onEventsLoaded }) 
     eventsLoadingRef.current = true;
     try {
       const events = await apiClient.getEvents({ city: userData?.city });
-      
+
       // Filter future events only
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      
+
       const futureEvents = events.filter(event => {
         const eventDate = new Date(event.date);
         eventDate.setHours(0, 0, 0, 0);
         return eventDate >= today;
       });
-      
+
       onEventsLoaded(futureEvents);
+
+      // Load user's participations
+      const participationPromises = futureEvents.map(async (event) => {
+        try {
+          const isParticipant = await apiClient.isEventParticipant(event.id);
+          return { eventId: event.id, isParticipant: !!isParticipant };
+        } catch (error) {
+          console.error('Error checking participation for event:', event.id, error);
+          return { eventId: event.id, isParticipant: false };
+        }
+      });
+
+      const participations = await Promise.all(participationPromises);
+      const participationSet = new Set(
+        participations.filter(p => p.isParticipant).map(p => p.eventId)
+      );
+
+      // Dispatch event to update MainApp state
+      window.dispatchEvent(new CustomEvent('motomate:eventParticipationsLoaded', {
+        detail: participationSet
+      }));
     } catch (err) {
       console.error('Error loading events:', err);
       setError('Не удалось загрузить события');
@@ -223,6 +244,13 @@ const ApiManager = ({ userData, onUsersLoaded, onChatsLoaded, onEventsLoaded }) 
       eventsLoadingRef.current = false;
     }
   }, [onEventsLoaded, userData?.city]);
+
+  // Re-load events when city changes
+  useEffect(() => {
+    if (userData?.city) {
+      loadEvents();
+    }
+  }, [userData?.city, loadEvents]);
 
   // WebSocket connection for real-time updates
   const connectWebSocket = (type, callback) => {

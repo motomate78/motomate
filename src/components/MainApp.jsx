@@ -708,6 +708,7 @@ const MainApp = () => {
   const [showParticipants, setShowParticipants] = useState(false);
 
   const [newEvent, setNewEvent] = useState({ title: '', description: '', date: '', time: '', address: '', link: '', latitude: null, longitude: null });
+  const [myEventParticipations, setMyEventParticipations] = useState(new Set()); // Set of event IDs I'm participating in
   // const fileInputRef = useRef(null);
   const profileInputRef = useRef(null);
   const galleryInputRef = useRef(null);
@@ -893,6 +894,16 @@ const MainApp = () => {
     setCurrentIndex(0);
     setCurrentImageIndex(0);
   }, [userData?.city, userData?.gender]);
+
+  // Обновление участия пользователя в событиях при загрузке
+  useEffect(() => {
+    const handleParticipationsLoaded = (event) => {
+      setMyEventParticipations(event.detail);
+    };
+
+    window.addEventListener('motomate:eventParticipationsLoaded', handleParticipationsLoaded);
+    return () => window.removeEventListener('motomate:eventParticipationsLoaded', handleParticipationsLoaded);
+  }, []);
 
   const handleNext = () => {
     if (filteredBikers.length > 0) {
@@ -2150,14 +2161,40 @@ const MainApp = () => {
               </div>
               
               <div className="space-y-3">
-                {events.map(event => {
+                {cityEvents.map(event => {
                   const isMyEvent = event.created_by_id === localStorage.getItem('userId');
+                  const isParticipating = myEventParticipations.has(event.id);
+                  const participantCount = event.participant_count || 0;
+
+                  const handleParticipation = async () => {
+                    try {
+                      if (isParticipating) {
+                        await apiClient.leaveEvent(event.id);
+                        setMyEventParticipations(prev => {
+                          const next = new Set(prev);
+                          next.delete(event.id);
+                          return next;
+                        });
+                      } else {
+                        await apiClient.joinEvent(event.id);
+                        setMyEventParticipations(prev => new Set(prev).add(event.id));
+                      }
+                      // Reload events to update participant count
+                      if (window.apiManager && window.apiManager.loadEvents) {
+                        window.apiManager.loadEvents();
+                      }
+                    } catch (error) {
+                      console.error('Error toggling participation:', error);
+                      alert('Ошибка: ' + error.message);
+                    }
+                  };
+
                   return (
                     <div key={event.id} className="bg-white/3 border border-white/5 rounded-[24px] p-5 relative group">
                       <div className="flex items-start justify-between mb-2">
                         <h4 className="font-bold text-sm uppercase italic flex-1 pr-6">{event.title}</h4>
                         {isMyEvent && (
-                          <button 
+                          <button
                             onClick={(e) => deleteEvent(e, event.id)}
                             className="absolute top-4 right-4 text-zinc-600 hover:text-red-500 transition-colors p-1"
                           >
@@ -2184,25 +2221,25 @@ const MainApp = () => {
                         )}
                       </div>
                       {event.address && (
-                        <button 
+                        <button
                           onClick={() => {
                             // Определяем, мобильное ли устройство
                             const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-                            
+
                             if (isMobile) {
                               // На мобильных открываем Яндекс Навигатор приложение
                               // Используем правильный формат для конечной точки
                               const yandexNavigatorUrl = `yandexnavi://show_point?text=${encodeURIComponent(event.address)}&lat=&lon=`;
-                              
+
                               // Пробуем открыть приложение
                               window.location.href = yandexNavigatorUrl;
-                              
+
                               // Fallback - строим маршрут до точки
                               setTimeout(() => {
                                 const routeUrl = `yandexnavi://build_route_on_map?text_to=${encodeURIComponent(event.address)}`;
                                 window.location.href = routeUrl;
                               }, 1000);
-                              
+
                               // Если приложение не установлено - открываем веб-версию
                               setTimeout(() => {
                                 const webUrl = `https://yandex.ru/maps/?text=${encodeURIComponent(event.address)}`;
@@ -2221,20 +2258,37 @@ const MainApp = () => {
                       )}
                     </div>
                     {event.link && (
-                      <a 
-                        href={event.link} 
-                        target="_blank" 
+                      <a
+                        href={event.link}
+                        target="_blank"
                         rel="noopener noreferrer"
                         className="mt-3 inline-flex items-center gap-2 text-xs text-orange-500 hover:text-orange-400 font-bold uppercase transition-colors"
                       >
                         <span>Подробнее →</span>
                       </a>
                     )}
+                    {/* Кнопка участия */}
+                    <button
+                      onClick={handleParticipation}
+                      className={`mt-3 w-full text-xs font-black uppercase tracking-widest py-3 rounded-xl transition-all flex items-center justify-center gap-2 ${
+                        isParticipating
+                          ? 'bg-green-600 hover:bg-green-700 text-white'
+                          : 'bg-orange-600 hover:bg-orange-700 text-white'
+                      }`}
+                    >
+                      <User size={14} />
+                      <span>{isParticipating ? 'Участвую' : 'Я участвую'}</span>
+                      {participantCount > 0 && (
+                        <span className="bg-white/20 px-2 py-0.5 rounded-full text-[10px]">
+                          {participantCount}
+                        </span>
+                      )}
+                    </button>
                     {/* Кнопка присоединения к групповому чату */}
                     {event.group_chat_id && (
-                      <button 
+                      <button
                         onClick={() => openGroupChat(event)}
-                        className="mt-3 w-full bg-orange-600 hover:bg-orange-700 text-white text-xs font-black uppercase tracking-widest py-3 rounded-xl transition-all flex items-center justify-center gap-2"
+                        className="mt-3 w-full bg-white/10 hover:bg-white/20 text-white text-xs font-black uppercase tracking-widest py-3 rounded-xl transition-all flex items-center justify-center gap-2"
                       >
                         <MessageCircle size={14} />
                         <span>Присоединиться к чату</span>
@@ -2243,7 +2297,7 @@ const MainApp = () => {
                   </div>
                   );
                 })}
-                {events.length === 0 && (
+                {cityEvents.length === 0 && (
                   <div className="text-center py-8 text-zinc-600 text-xs italic">
                     Пока нет событий. Создайте первое!
                   </div>
@@ -3420,10 +3474,11 @@ const MainApp = () => {
                     <label className="text-[9px] font-black text-zinc-600 uppercase ml-1">Дата *</label>
                     <div className={`flex items-center gap-3 bg-white/5 border ${showEventErrors && !newEvent.date ? 'border-red-500/50' : 'border-white/10'} rounded-2xl p-4`}>
                       <Calendar size={18} className="text-zinc-400 flex-shrink-0" />
-                      <input 
-                        type="date" 
+                      <input
+                        type="date"
                         value={newEvent.date}
                         onChange={(e) => setNewEvent({...newEvent, date: e.target.value})}
+                        min={new Date().toISOString().split('T')[0]}
                         className="flex-1 bg-transparent text-sm outline-none text-white placeholder-zinc-500"
                       />
                     </div>
