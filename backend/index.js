@@ -1399,10 +1399,14 @@ router.get('/geo/suggest', async (req, res) => {
 router.get('/events', async (req, res) => {
   try {
     const { city, page = 1, limit = 20 } = req.query;
-    
+
+    // Get today's date at midnight local time
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
     const where = {
       date: {
-        gte: new Date(),
+        gte: today,
       },
     };
     if (city) where.city = city;
@@ -1413,13 +1417,23 @@ router.get('/events', async (req, res) => {
         createdBy: {
           select: { id: true, name: true, image: true },
         },
+        participants: {
+          select: { id: true },
+        },
       },
       skip: (parseInt(page) - 1) * parseInt(limit),
       take: parseInt(limit),
       orderBy: { date: 'asc' },
     });
 
-    res.json(events);
+    // Add participant count to each event
+    const eventsWithCount = events.map(event => ({
+      ...event,
+      participant_count: event.participants.length,
+      participants: undefined,
+    }));
+
+    res.json(eventsWithCount);
   } catch (error) {
     console.error('Get events error:', error);
     res.status(500).json({ error: 'Failed to get events' });
@@ -1495,6 +1509,87 @@ router.delete('/events/:id', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Delete event error:', error);
     res.status(500).json({ error: 'Failed to delete event' });
+  }
+});
+
+// Join event
+router.post('/events/:eventId/join', authenticateToken, async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const userId = req.user.userId;
+
+    // Check if event exists
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+    });
+
+    if (!event) {
+      return res.status(404).json({ error: 'Event not found' });
+    }
+
+    // Create participant record
+    const participant = await prisma.eventParticipant.upsert({
+      where: {
+        event_id_user_id: {
+          event_id: eventId,
+          user_id: userId,
+        },
+      },
+      update: {},
+      create: {
+        event_id: eventId,
+        user_id: userId,
+      },
+    });
+
+    res.json({ success: true, participant });
+  } catch (error) {
+    console.error('Join event error:', error);
+    res.status(500).json({ error: 'Failed to join event' });
+  }
+});
+
+// Leave event
+router.delete('/events/:eventId/leave', authenticateToken, async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const userId = req.user.userId;
+
+    await prisma.eventParticipant.delete({
+      where: {
+        event_id_user_id: {
+          event_id: eventId,
+          user_id: userId,
+        },
+      },
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Leave event error:', error);
+    res.status(500).json({ error: 'Failed to leave event' });
+  }
+});
+
+// Check if user is participant
+router.get('/events/:eventId/is-participant', authenticateToken, async (req, res) => {
+  try {
+    const { eventId } = req.params;
+    const userId = req.user.userId;
+
+    const participant = await prisma.eventParticipant.findUnique({
+      where: {
+        event_id_user_id: {
+          event_id: eventId,
+          user_id: userId,
+        },
+      },
+    });
+
+    res.json({ isParticipant: !!participant });
+  } catch (error) {
+    console.error('Check participant error:', error);
+    res.status(500).json({ error: 'Failed to check participant status' });
   }
 });
 
