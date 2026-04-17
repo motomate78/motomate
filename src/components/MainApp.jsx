@@ -506,30 +506,18 @@ const MainApp = () => {
                         clearTimeout(timeout);
                         
                         if (user) {
-                            console.log('User profile data:', { 
-                                id: user.id, 
-                                name: user.name, 
-                                age: user.age, 
-                                hasImages: !!user.images,
-                                imagesCount: user.images?.length || 0 
-                            });
+                            console.log('User profile data loaded successfully');
                         }
                       } catch (error) {
                         console.error('Error loading user profile:', error);
                         
-                        // Handle 403/INVALID TOKEN errors
-                        if (error.message.includes('403') || error.message.includes('INVALID TOKEN') || error.message.includes('Unauthorized')) {
-                          console.log('Token invalid, clearing and redirecting...');
+                        // Handle 401/403 errors (session expired)
+                        if (error.status === 401 || error.status === 403 || error.message.includes('401') || error.message.includes('403')) {
+                          console.log('Token invalid, clearing session...');
                           apiClient.removeToken();
                           localStorage.removeItem('motomate_token');
                           localStorage.removeItem('userId');
-                          setError('Сессия истекла. Пожалуйста, войдите снова.');
-                          // Redirect to login page or reload
-                          setTimeout(() => {
-                            window.location.reload();
-                          }, 2000);
-                        } else {
-                          setError('Ошибка: ' + error.message);
+                          // Не вызываем window.location.reload() сразу, даем системе шанс восстановиться или показать вход
                         }
                         clearTimeout(timeout);
                       }
@@ -636,9 +624,10 @@ const MainApp = () => {
 
   useEffect(() => {
     const handleApiError = ({ status, message }) => {
+      // Игнорируем ошибки сессии при начальной загрузке, чтобы избежать бесконечных редиректов
       if (status === 401 || status === 403) {
-        setError('Сессия истекла. Пожалуйста, войдите снова.');
-        setTimeout(() => window.location.reload(), 1200);
+        console.warn('API Session error (ignored to prevent loop):', status);
+        // Не вызываем setError, чтобы не блокировать интерфейс при фоновой проверке
         return;
       }
       if (status >= 500) {
@@ -651,10 +640,10 @@ const MainApp = () => {
     };
 
     apiClient.setErrorHandler(handleApiError);
-    window.addEventListener('motomate:sessionExpired', handleSessionExpired);
+    // window.addEventListener('motomate:sessionExpired', handleSessionExpired);
     return () => {
       apiClient.setErrorHandler(null);
-      window.removeEventListener('motomate:sessionExpired', handleSessionExpired);
+      // window.removeEventListener('motomate:sessionExpired', handleSessionExpired);
     };
   }, []);
 
@@ -676,10 +665,12 @@ const MainApp = () => {
   const messagesEndRef = useRef(null);
   const [swipedChatId, setSwipedChatId] = useState(null);
   const [showEventModal, setShowEventModal] = useState(false);
+  const [showEventErrors, setShowEventErrors] = useState(false);
   const [viewingProfile, setViewingProfile] = useState(null);
   const [viewingProfileLoading, setViewingProfileLoading] = useState(false);
   
   // Settings States
+  const [settingsDraft, setSettingsDraft] = useState(null);
   const [isEditingEmail, setIsEditingEmail] = useState(false);
   const [newEmail, setNewEmail] = useState('');
   const [emailCurrentPassword, setEmailCurrentPassword] = useState('');
@@ -1317,7 +1308,10 @@ const MainApp = () => {
                 // Показываем пользователю что происходит сжатие
                 console.log('Сжимаем изображение...');
                 
-                const imageUrl = await userService.uploadAvatar(userId, file, userData?.image || null);
+                // Сохраняем старый аватар ПЕРЕД загрузкой нового
+                const oldAvatarUrl = userData?.image;
+                
+                const imageUrl = await userService.uploadAvatar(userId, file, null); // Передаем null, чтобы НЕ удалять старый из S3
                 console.log('Avatar uploaded:', imageUrl);
                 
                 // Обновляем состояние аватара
@@ -1328,13 +1322,42 @@ const MainApp = () => {
                     setUserData(prev => ({...prev}));
                 }, 100);
                 
-                // Добавляем аватар в галерею с задержкой
-                setTimeout(async () => {
-                    if (!userImages.includes(imageUrl)) {
-                        console.log('Adding avatar to gallery:', imageUrl);
-                        await updateGallery([imageUrl, ...userImages]);
+                // Добавляем старый аватар в галерею, если он был
+                if (oldAvatarUrl) {
+                    setUserImages(prevImages => {
+                      if (!prevImages.includes(oldAvatarUrl)) {
+                        const updated = [oldAvatarUrl, ...prevImages];
+                        localStorage.setItem('userImages', JSON.stringify(updated));
+                        return updated;
+                      }
+                      return prevImages;
+                    });
+                    
+                    // Также сохраняем метаданные старого аватара в БД как обычное фото галереи
+                    try {
+                      const token = localStorage.getItem('motomate_token');
+                      await fetch('/api/users/profile/images', {
+                        method: 'POST',
+                        headers: {
+                          'Authorization': `Bearer ${token}`,
+                          'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ url: oldAvatarUrl })
+                      });
+                    } catch (dbErr) {
+                      console.warn('Failed to save old avatar metadata to gallery db:', dbErr);
                     }
-                }, 500);
+                }
+                
+                // Новый аватар тоже добавляем в галерею
+                setUserImages(prevImages => {
+                  if (!prevImages.includes(imageUrl)) {
+                    const updated = [imageUrl, ...prevImages];
+                    localStorage.setItem('userImages', JSON.stringify(updated));
+                    return updated;
+                  }
+                  return prevImages;
+                });
             } catch (uploadError) {
                 console.error('Avatar upload error:', uploadError);
                 alert('Avatar upload error: ' + JSON.stringify(uploadError));
@@ -2114,24 +2137,25 @@ const MainApp = () => {
                   </Suspense>
                 </>
               )}
-              
-              {!isMapFullscreen && (
-                <div className="absolute bottom-4 left-4 right-4 bg-black/80 backdrop-blur-xl border border-white/10 p-4 rounded-[24px] flex items-center gap-3 z-[10]">
-                  <Navigation className="text-orange-500" size={18} />
-                  <div className="flex-1">
-                    <p className="text-xs font-black uppercase italic text-white">Байкеры рядом</p>
-                    <p className="text-[10px] text-zinc-500 uppercase">В сети: {cityBikers.length}</p>
-                  </div>
-                  <button
-                    onClick={() => setIsMapFullscreen(true)}
-                    className="bg-orange-600 p-2 rounded-full text-white hover:bg-orange-700 transition-colors"
-                    title="Открыть на полный экран"
-                  >
-                    <Maximize2 size={16} />
-                  </button>
-                </div>
-              )}
             </div>
+
+            {/* БАЙКЕРЫ РЯДОМ - под картой */}
+            {!isMapFullscreen && (
+              <div className="mx-4 mt-4 bg-black/80 backdrop-blur-xl border border-white/10 p-4 rounded-[24px] flex items-center gap-3">
+                <Navigation className="text-orange-500" size={18} />
+                <div className="flex-1">
+                  <p className="text-xs font-black uppercase italic text-white">Байкеры рядом</p>
+                  <p className="text-[10px] text-zinc-500 uppercase">В сети: {cityBikers.length}</p>
+                </div>
+                <button
+                  onClick={() => setIsMapFullscreen(true)}
+                  className="bg-orange-600 p-2 rounded-full text-white hover:bg-orange-700 transition-colors"
+                  title="Открыть на полный экран"
+                >
+                  <Maximize2 size={16} />
+                </button>
+              </div>
+            )}
 
             {/* СЕКЦИЯ СОБЫТИЙ - только не в полноэкранном режиме */}
             {!isMapFullscreen && (
@@ -2857,37 +2881,36 @@ const MainApp = () => {
             
             {/* ГАЛЕРЕЯ ФОТО */}
             <div className="w-full mb-6">
-                <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500 mb-4 ml-1">Галерея</h3>
-                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2 sm:gap-3 w-full">
+                <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500 mb-4 ml-1 text-center sm:text-left">Галерея</h3>
+                <div className="flex flex-wrap justify-center gap-3 w-full max-w-4xl mx-auto">
                   {userImages.map((img, idx) => {
                     const isMainPhoto = userData?.image === img;
                     return (
-                      <div key={idx} className="aspect-square rounded-lg sm:rounded-2xl overflow-hidden border border-white/10 relative group cursor-pointer" onClick={() => {
-                    setSelectedImage(img);
-                    setImageContext({ type: 'gallery', images: userImages, currentIndex: idx });
-                  }}>
-                        <img src={img} className="w-full h-full object-cover hover:scale-105 transition-transform" alt={`Photo ${idx + 1}`} />
+                      <div key={idx} className="w-[calc(45%-8px)] sm:w-24 md:w-32 aspect-square rounded-2xl sm:rounded-3xl overflow-hidden border border-white/10 relative group cursor-pointer shadow-lg active:scale-95 transition-all" onClick={() => {
+                        setSelectedImage(img);
+                        setImageContext({ type: 'gallery', images: userImages, currentIndex: idx });
+                      }}>
+                        <img src={img} className="w-full h-full object-cover hover:scale-110 transition-transform duration-500" alt={`Photo ${idx + 1}`} />
                         {isMainPhoto && (
-                          <div className="absolute top-0.5 left-0.5 px-1.5 py-0.25 bg-orange-600 text-[7px] font-black uppercase rounded">Главное</div>
+                          <div className="absolute top-1 left-1 px-2 py-0.5 bg-orange-600 text-[8px] font-black uppercase rounded-lg shadow-lg z-10">Главное</div>
                         )}
                         <button
                           onClick={async (e) => {
-                            e.stopPropagation(); // Предотвращаем открытие модального окна при удалении
+                            e.stopPropagation();
                             if (window.confirm('Вы точно хотите удалить фотографию?')) {
                               const imageToDelete = userImages[idx];
                               const newImages = userImages.filter((_, i) => i !== idx);
                               setUserImages(newImages);
                               await updateGallery(newImages);
                               await deleteGalleryImageByUrl(imageToDelete);
-                              // Если удаляем главное фото, убираем его из userData, но НЕ заменяем автоматически
                               if (isMainPhoto) {
                                 setUserData({...userData, image: null});
                               }
                             }
                           }}
-                          className="absolute top-0.5 right-0.5 bg-red-600/90 hover:bg-red-600 rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity active:scale-90"
+                          className="absolute top-1 right-1 bg-red-600/90 hover:bg-red-600 rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-opacity active:scale-90 shadow-lg z-10"
                         >
-                          <X size={10} className="text-white" />
+                          <X size={12} className="text-white" />
                         </button>
                       </div>
                     );
@@ -2895,12 +2918,15 @@ const MainApp = () => {
                   <button
                     onClick={() => galleryInputRef.current?.click()}
                     disabled={isUploading}
-                    className="aspect-square rounded-lg sm:rounded-2xl border-2 border-dashed border-white/20 flex items-center justify-center hover:border-white/40 transition-colors active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-[calc(45%-8px)] sm:w-24 md:w-32 aspect-square rounded-2xl sm:rounded-3xl border-2 border-dashed border-white/10 flex items-center justify-center hover:border-orange-500/50 hover:bg-orange-500/5 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed group"
                   >
                     {isUploading ? (
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      <div className="w-5 h-5 border-2 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
                     ) : (
-                      <Plus size={16} className="text-zinc-600" />
+                      <div className="flex flex-col items-center gap-1">
+                        <Plus size={24} className="text-zinc-600 group-hover:text-orange-500 transition-colors" />
+                        <span className="text-[9px] font-black uppercase text-zinc-600 group-hover:text-orange-500 transition-colors hidden sm:block">Добавить</span>
+                      </div>
                     )}
                   </button>
                 </div>
@@ -2915,7 +2941,7 @@ const MainApp = () => {
               className="hidden"
             />
             <div className="w-full max-w-md space-y-3">
-              <button onClick={() => setShowSettings(true)} data-edit-profile="true" className="w-full bg-white/[0.03] border border-white/5 p-6 rounded-[32px] flex items-center justify-between">
+              <button onClick={() => { setSettingsDraft({...userData}); setShowSettings(true); }} data-edit-profile="true" className="w-full bg-white/[0.03] border border-white/5 p-6 rounded-[32px] flex items-center justify-between">
                 <div className="flex items-center gap-4 text-orange-500"><Edit3 size={20}/><span className="font-bold uppercase tracking-tighter text-sm text-white">Редактирование анкеты</span></div>
                 <ChevronLeft size={20} className="rotate-180 text-zinc-700" />
               </button>
@@ -3018,36 +3044,40 @@ const MainApp = () => {
                   </div>
                 </div>
 
-                <div className="space-y-2"><label className="text-[10px] font-black text-zinc-600 uppercase">Имя *</label><input type="text" value={userData.name || ''} onChange={e => setUserData({...userData, name: e.target.value})} className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 outline-none focus:border-orange-500" /></div>
+                <div className="space-y-2"><label className="text-[10px] font-black text-zinc-600 uppercase">Имя *</label><input type="text" value={settingsDraft?.name || ''} onChange={e => setSettingsDraft({...settingsDraft, name: e.target.value})} className={`w-full bg-white/5 border ${!settingsDraft?.name ? 'border-red-500/50' : 'border-white/10'} rounded-2xl p-4 outline-none focus:border-orange-500`} placeholder="Введите ваше имя" />
+                  {!settingsDraft?.name && <p className="text-[9px] text-red-500 font-bold uppercase ml-1">Поле обязательно для заполнения</p>}
+                </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-zinc-600 uppercase">Возраст 18+ *</label>
                   <input 
                     type="number" 
                     min="18" 
                     max="100" 
-                    value={userData.age || ''} 
+                    value={settingsDraft?.age || ''} 
                     onChange={e => {
                       const value = e.target.value;
-                      // Позволяем вводить любые числа, валидацию сделаем при сохранении
                       if (value === '') {
-                        setUserData({...userData, age: null});
+                        setSettingsDraft({...settingsDraft, age: null});
                       } else {
                         const age = parseInt(value);
                         if (!isNaN(age)) {
-                          setUserData({...userData, age});
+                          setSettingsDraft({...settingsDraft, age});
                         }
                       }
                     }} 
-                    className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 outline-none focus:border-orange-500"
+                    className={`w-full bg-white/5 border ${!settingsDraft?.age ? 'border-red-500/50' : 'border-white/10'} rounded-2xl p-4 outline-none focus:border-orange-500`}
                     placeholder="18+"
                   />
+                  {!settingsDraft?.age && <p className="text-[9px] text-red-500 font-bold uppercase ml-1">Поле обязательно для заполнения (18+)</p>}
                 </div>
                 <div className="space-y-2"><label className="text-[10px] font-black text-zinc-600 uppercase">Город *</label>
                   <div className="flex gap-2 items-stretch">
                     <div className="flex-1">
                       <CityAutocomplete
-                        value={userData.city || ''}
-                        onChange={(value) => setUserData({ ...userData, city: value, latitude: null, longitude: null })}
+                        value={settingsDraft?.city || ''}
+                        onChange={(value) => {
+                          setSettingsDraft({ ...settingsDraft, city: value, latitude: null, longitude: null });
+                        }}
                         placeholder="Введите город"
                       />
                     </div>
@@ -3066,10 +3096,11 @@ const MainApp = () => {
                       Авто
                     </button>
                   </div>
-                  {detectedCity && userData.city !== detectedCity && (
+                  {!settingsDraft?.city && <p className="text-[9px] text-red-500 font-bold uppercase ml-1">Выберите город из списка</p>}
+                  {detectedCity && settingsDraft?.city !== detectedCity && (
                     <button
                       type="button"
-                      onClick={() => setUserData({ ...userData, city: detectedCity, latitude: detectedCoordinates?.lat, longitude: detectedCoordinates?.lon })}
+                      onClick={() => setSettingsDraft({ ...settingsDraft, city: detectedCity, latitude: detectedCoordinates?.lat, longitude: detectedCoordinates?.lon })}
                       className="text-xs text-blue-400 hover:text-blue-300 mt-2 p-2 bg-blue-600/10 rounded-lg w-full"
                     >
                       ✓ Найден город: {detectedCity}
@@ -3083,8 +3114,8 @@ const MainApp = () => {
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-zinc-600 uppercase">Пол *</label>
                   <select 
-                    value={userData.gender || 'male'} 
-                    onChange={e => setUserData({...userData, gender: e.target.value})} 
+                    value={settingsDraft?.gender || 'male'} 
+                    onChange={e => setSettingsDraft({...settingsDraft, gender: e.target.value})} 
                     className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 outline-none appearance-none cursor-pointer focus:border-orange-500"
                   >
                     <option value="male" className="bg-zinc-900">Мужской</option>
@@ -3096,23 +3127,23 @@ const MainApp = () => {
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center gap-3 mb-2">
                        <button 
-                         onClick={() => setUserData({...userData, has_bike: true})}
-                         className={`flex-1 py-3 rounded-xl border transition-all ${userData.has_bike ? 'bg-orange-500 border-orange-500 text-white font-bold' : 'bg-white/5 border-white/10 text-zinc-400'}`}
+                         onClick={() => setSettingsDraft({...settingsDraft, has_bike: true})}
+                         className={`flex-1 py-3 rounded-xl border transition-all ${settingsDraft?.has_bike ? 'bg-orange-500 border-orange-500 text-white font-bold' : 'bg-white/5 border-white/10 text-zinc-400'}`}
                        >
                          Есть байк
                        </button>
                        <button 
-                         onClick={() => setUserData({...userData, has_bike: false, bike: ''})}
-                         className={`flex-1 py-3 rounded-xl border transition-all ${!userData.has_bike ? 'bg-orange-500 border-orange-500 text-white font-bold' : 'bg-white/5 border-white/10 text-zinc-400'}`}
+                         onClick={() => setSettingsDraft({...settingsDraft, has_bike: false, bike: ''})}
+                         className={`flex-1 py-3 rounded-xl border transition-all ${!settingsDraft?.has_bike ? 'bg-orange-500 border-orange-500 text-white font-bold' : 'bg-white/5 border-white/10 text-zinc-400'}`}
                        >
                          Нет байка
                        </button>
                     </div>
-                    {userData.has_bike && (
+                    {settingsDraft?.has_bike && (
                       <input 
                         type="text" 
-                        value={userData.bike || ''} 
-                        onChange={e => setUserData({...userData, bike: e.target.value})} 
+                        value={settingsDraft?.bike || ''} 
+                        onChange={e => setSettingsDraft({...settingsDraft, bike: e.target.value})} 
                         className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 outline-none focus:border-orange-500 animate-in fade-in slide-in-from-top-2" 
                         placeholder="Yamaha R1" 
                       />
@@ -3123,8 +3154,8 @@ const MainApp = () => {
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-zinc-600 uppercase">О себе</label>
                   <textarea 
-                    value={userData.about || ''} 
-                    onChange={e => setUserData({...userData, about: e.target.value})} 
+                    value={settingsDraft?.about || ''} 
+                    onChange={e => setSettingsDraft({...settingsDraft, about: e.target.value})} 
                     className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 h-24 outline-none focus:border-orange-500 resize-none text-sm"
                   />
                 </div>
@@ -3132,8 +3163,8 @@ const MainApp = () => {
                   <div className="space-y-2">
                     <label className="text-[9px] font-black text-zinc-600 uppercase">Темп</label>
                     <select 
-                        value={userData.temp || 'Спокойный'} 
-                        onChange={e => setUserData({...userData, temp: e.target.value})} 
+                        value={settingsDraft?.temp || 'Спокойный'} 
+                        onChange={e => setSettingsDraft({...settingsDraft, temp: e.target.value})} 
                         className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-xs outline-none focus:border-orange-500 appearance-none cursor-pointer"
                     >
                         <option value="Спокойный" className="bg-zinc-900">Спокойный</option>
@@ -3143,8 +3174,8 @@ const MainApp = () => {
                   <div className="space-y-2">
                     <label className="text-[9px] font-black text-zinc-600 uppercase">Музыка</label>
                     <select 
-                        value={userData.music || 'Рок'} 
-                        onChange={e => setUserData({...userData, music: e.target.value})} 
+                        value={settingsDraft?.music || 'Рок'} 
+                        onChange={e => setSettingsDraft({...settingsDraft, music: e.target.value})} 
                         className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-xs outline-none focus:border-orange-500 appearance-none cursor-pointer"
                     >
                         {['Рок', 'Поп', 'Рэп', 'Техно', 'Шансон', 'Джаз', 'Метал', 'Классика'].map(genre => (
@@ -3155,8 +3186,8 @@ const MainApp = () => {
                   <div className="space-y-2">
                     <label className="text-[9px] font-black text-zinc-600 uppercase">Экип</label>
                     <select 
-                        value={userData.equip || 'Только шлем'} 
-                        onChange={e => setUserData({...userData, equip: e.target.value})} 
+                        value={settingsDraft?.equip || 'Только шлем'} 
+                        onChange={e => setSettingsDraft({...settingsDraft, equip: e.target.value})} 
                         className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-xs outline-none focus:border-orange-500 appearance-none cursor-pointer"
                     >
                         <option value="Только шлем" className="bg-zinc-900">Только шлем</option>
@@ -3167,8 +3198,8 @@ const MainApp = () => {
                   <div className="space-y-2">
                     <label className="text-[9px] font-black text-zinc-600 uppercase">Цель</label>
                     <select 
-                        value={userData.goal || 'Только поездки'} 
-                        onChange={e => setUserData({...userData, goal: e.target.value})} 
+                        value={settingsDraft?.goal || 'Только поездки'} 
+                        onChange={e => setSettingsDraft({...settingsDraft, goal: e.target.value})} 
                         className="w-full bg-white/5 border border-white/10 rounded-xl p-3 text-xs outline-none focus:border-orange-500 appearance-none cursor-pointer"
                     >
                         <option value="Только поездки" className="bg-zinc-900">Только поездки</option>
@@ -3180,46 +3211,57 @@ const MainApp = () => {
               <button 
                 onClick={async () => {
                   try {
-                    if (!isRequiredProfileFilled(userData)) {
+                    if (!isRequiredProfileFilled(settingsDraft)) {
                       alert('Заполните обязательные поля: Имя, Возраст 18+, Город и Пол');
                       return;
                     }
 
-                    await apiClient.updateProfile({
-                        name: userData.name || null,
-                        age: userData.age || null,
-                        city: userData.city,
-                        bike: userData.bike,
-                        has_bike: userData.has_bike,
-                        gender: userData.gender,
-                        about: userData.about,
-                        temp: userData.temp,
-                        music: userData.music,
-                        equip: userData.equip,
-                        goal: userData.goal,
-                        latitude: userData.latitude ?? null,
-                        longitude: userData.longitude ?? null,
+                    const updatedProfile = {
+                        name: settingsDraft.name || null,
+                        age: settingsDraft.age || null,
+                        city: settingsDraft.city,
+                        bike: settingsDraft.bike,
+                        has_bike: settingsDraft.has_bike,
+                        gender: settingsDraft.gender,
+                        about: settingsDraft.about,
+                        temp: settingsDraft.temp,
+                        music: settingsDraft.music,
+                        equip: settingsDraft.equip,
+                        goal: settingsDraft.goal,
+                        latitude: settingsDraft.latitude ?? null,
+                        longitude: settingsDraft.longitude ?? null,
                         interests: [
-                            { id: 'style', label: 'Стиль', value: userData.temp || 'Спокойный', icon: 'Gauge' },
-                            { id: 'music', label: 'Музыка', value: userData.music || 'Рок', icon: 'Music' },
-                            { id: 'equip', label: 'Экип', value: userData.equip || 'Только шлем', icon: 'Shield' },
-                            { id: 'goal', label: 'Цель', value: userData.goal || 'Только поездки', icon: 'Target' }
+                            { id: 'style', label: 'Стиль', value: settingsDraft.temp || 'Спокойный', icon: 'Gauge' },
+                            { id: 'music', label: 'Музыка', value: settingsDraft.music || 'Рок', icon: 'Music' },
+                            { id: 'equip', label: 'Экип', value: settingsDraft.equip || 'Только шлем', icon: 'Shield' },
+                            { id: 'goal', label: 'Цель', value: settingsDraft.goal || 'Только поездки', icon: 'Target' }
                         ]
-                    });
+                    };
+
+                    await apiClient.updateProfile(updatedProfile);
                     
+                    // Обновляем userData только после успешного сохранения
+                    setUserData({ ...userData, ...updatedProfile });
+                    
+                    // Обновляем кэш пользователей для ApiManager, чтобы сработал триггер на смену города
+                    const cacheKey = `users_${updatedProfile.city}_${updatedProfile.gender}`;
+                    localStorage.removeItem(cacheKey);
+
                     alert('Профиль успешно сохранен!');
                     setShowSettings(false);
                     
                     // Обновляем текущий индекс, если текущий байкер не из нового города
-                    if (currentBiker && currentBiker.city !== userData.city) {
+                    if (currentBiker && currentBiker.city !== settingsDraft.city) {
                         setCurrentIndex(0);
                     }
                     
                     // Async reload without blocking UI
                     if (window.apiManager?.loadUsers) {
+                      console.log('Manually reloading users...');
                       window.apiManager.loadUsers().catch(() => {});
                     }
                     if (window.apiManager?.loadEvents) {
+                      console.log('Manually reloading events...');
                       window.apiManager.loadEvents().catch(() => {});
                     }
                   } catch (err) {
@@ -3227,7 +3269,7 @@ const MainApp = () => {
                     alert('Ошибка при сохранении профиля: ' + err.message);
                   }
                 }} 
-                disabled={profileSaveDisabled}
+                disabled={!isRequiredProfileFilled(settingsDraft)}
                 className="w-full bg-orange-600 disabled:bg-orange-600/40 disabled:cursor-not-allowed p-5 rounded-[24px] font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all"
               >
                 Сохранить
@@ -3363,14 +3405,15 @@ const MainApp = () => {
               </div>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-[10px] font-black text-zinc-500 mb-1.5 ml-1 uppercase tracking-widest">Название</label>
+                  <label className="block text-[10px] font-black text-zinc-500 mb-1.5 ml-1 uppercase tracking-widest">Название *</label>
                   <input 
                     type="text" 
                     value={newEvent.title}
                     onChange={(e) => setNewEvent({...newEvent, title: e.target.value})}
-                    className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-sm outline-none focus:border-orange-500"
+                    className={`w-full bg-white/5 border ${showEventErrors && !newEvent.title ? 'border-red-500/50' : 'border-white/10'} rounded-2xl p-4 text-sm outline-none focus:border-orange-500`}
                     placeholder="Ночной прохват"
                   />
+                  {showEventErrors && !newEvent.title && <p className="text-[9px] text-red-500 font-bold uppercase mt-1 ml-1">Введите название события</p>}
                 </div>
                 <div>
                   <label className="block text-[10px] font-black text-zinc-500 mb-1.5 ml-1 uppercase tracking-widest">Описание</label>
@@ -3382,43 +3425,52 @@ const MainApp = () => {
                   />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-2xl p-4">
-                    <Calendar size={18} className="text-zinc-400 flex-shrink-0" />
-                    <input 
-                      type="date" 
-                      value={newEvent.date}
-                      onChange={(e) => setNewEvent({...newEvent, date: e.target.value})}
-                      className="flex-1 bg-transparent text-sm outline-none text-white placeholder-zinc-500"
-                    />
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[9px] font-black text-zinc-600 uppercase ml-1">Дата *</label>
+                    <div className={`flex items-center gap-3 bg-white/5 border ${showEventErrors && !newEvent.date ? 'border-red-500/50' : 'border-white/10'} rounded-2xl p-4`}>
+                      <Calendar size={18} className="text-zinc-400 flex-shrink-0" />
+                      <input 
+                        type="date" 
+                        value={newEvent.date}
+                        onChange={(e) => setNewEvent({...newEvent, date: e.target.value})}
+                        className="flex-1 bg-transparent text-sm outline-none text-white placeholder-zinc-500"
+                      />
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-2xl p-4">
-                    <Clock size={18} className="text-zinc-400 flex-shrink-0" />
-                    <input 
-                      type="time" 
-                      value={newEvent.time}
-                      onChange={(e) => setNewEvent({...newEvent, time: e.target.value})}
-                      className="flex-1 bg-transparent text-sm outline-none text-white placeholder-zinc-500"
-                    />
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[9px] font-black text-zinc-600 uppercase ml-1">Время *</label>
+                    <div className={`flex items-center gap-3 bg-white/5 border ${showEventErrors && !newEvent.time ? 'border-red-500/50' : 'border-white/10'} rounded-2xl p-4`}>
+                      <Clock size={18} className="text-zinc-400 flex-shrink-0" />
+                      <input 
+                        type="time" 
+                        value={newEvent.time}
+                        onChange={(e) => setNewEvent({...newEvent, time: e.target.value})}
+                        className="flex-1 bg-transparent text-sm outline-none text-white placeholder-zinc-500"
+                      />
+                    </div>
                   </div>
                 </div>
                 <div className="space-y-2">
-                    <label className="block text-[10px] font-black text-zinc-500 mb-1.5 ml-1 uppercase tracking-widest">Место встречи</label>
-                    <AddressAutocomplete
-                      value={newEvent.address}
-                      onChange={(result) => {
-                        const normalized = typeof result === 'string'
-                          ? { address: result, coordinates: null }
-                          : (result || { address: '', coordinates: null });
-                        setNewEvent((prev) => ({
-                          ...prev,
-                          address: normalized.address || '',
-                          latitude: normalized.coordinates?.lat ?? null,
-                          longitude: normalized.coordinates?.lon ?? null,
-                        }));
-                      }}
-                      city={userData?.city || ''}
-                      placeholder="Адрес события..."
-                    />
+                    <label className="block text-[10px] font-black text-zinc-500 mb-1.5 ml-1 uppercase tracking-widest">Место встречи *</label>
+                    <div className={`border ${showEventErrors && !newEvent.address ? 'border-red-500/50' : 'border-transparent'} rounded-2xl`}>
+                      <AddressAutocomplete
+                        value={newEvent.address}
+                        onChange={(result) => {
+                          const normalized = typeof result === 'string'
+                            ? { address: result, coordinates: null }
+                            : (result || { address: '', coordinates: null });
+                          setNewEvent((prev) => ({
+                            ...prev,
+                            address: normalized.address || '',
+                            latitude: normalized.coordinates?.lat ?? null,
+                            longitude: normalized.coordinates?.lon ?? null,
+                          }));
+                        }}
+                        city={userData?.city || ''}
+                        placeholder="Адрес события..."
+                      />
+                    </div>
+                    {showEventErrors && !newEvent.address && <p className="text-[9px] text-red-500 font-bold uppercase ml-1">Укажите адрес на карте</p>}
                   </div>
                 <div>
                   <label className="block text-[10px] font-black text-zinc-500 mb-1.5 ml-1 uppercase tracking-widest">Ссылка на организатора</label>
@@ -3430,8 +3482,28 @@ const MainApp = () => {
                     placeholder="https://vk.com/event или https://t.me/event"
                   />
                 </div>
+                
+                {showEventErrors && (!newEvent.title || !newEvent.date || !newEvent.time || !newEvent.address) && (
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 mt-2">
+                    <p className="text-[10px] text-red-500 font-bold uppercase text-center">
+                      Осталось заполнить: {[
+                        !newEvent.title && "Название",
+                        !newEvent.date && "Дата",
+                        !newEvent.time && "Время",
+                        !newEvent.address && "Место"
+                      ].filter(Boolean).join(", ")}
+                    </p>
+                  </div>
+                )}
+
                 <button 
-                  onClick={createEvent}
+                  onClick={() => {
+                    if (!newEvent.title || !newEvent.date || !newEvent.time || !newEvent.address) {
+                      setShowEventErrors(true);
+                      return;
+                    }
+                    createEvent();
+                  }}
                   className="w-full bg-orange-600 p-5 rounded-[24px] font-black uppercase tracking-widest shadow-xl active:scale-95 transition-all mt-4"
                 >
                   Создать событие

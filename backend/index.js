@@ -15,6 +15,9 @@ const webpush = require('web-push');
 require('dotenv').config();
 
 const app = express();
+// Trust proxy for express-rate-limit behind Nginx
+app.set('trust proxy', 1);
+
 const router = express.Router();
 const prisma = new PrismaClient();
 let io = null;
@@ -1332,48 +1335,73 @@ router.get('/likes/sent', authenticateToken, async (req, res) => {
 // Geo Proxy Routes - to avoid CORS issues with Yandex API
 router.get('/geo/suggest', async (req, res) => {
   try {
-    const { text, type = 'geo', results = 6, lang = 'ru_RU' } = req.query;
+    const { text, results = 10, lang = 'ru_RU', kind } = req.query;
     const apiKey = process.env.YANDEX_API_KEY || process.env.VITE_YANDEX_API_KEY;
 
-    if (!apiKey) {
-      return res.status(500).json({ error: 'Yandex API key not configured' });
-    }
-
-    if (!text || String(text).trim().length < 2) {
+    if (!text || String(text).trim().length === 0) {
       return res.json({ results: [] });
     }
 
-    const yandexUrl = new URL('https://suggest-maps.yandex.ru/v1/suggest');
-    yandexUrl.searchParams.append('apikey', apiKey);
-    yandexUrl.searchParams.append('text', String(text));
-    yandexUrl.searchParams.append('type', String(type));
-    yandexUrl.searchParams.append('results', String(results));
-    yandexUrl.searchParams.append('lang', String(lang));
-
-    const response = await fetch(yandexUrl.toString());
-    
-    if (!response.ok) {
-      return res.status(response.status).json({ error: 'Yandex API error' });
+    if (!apiKey) {
+      return res.status(500).json({ error: 'API key not configured' });
     }
 
-    const data = await response.json();
-    
-    // Normalize response
-    const normalized = (data.results || []).map((item) => {
-      const title = item.title?.text || item.title || '';
-      const subtitle = item.subtitle?.text || item.subtitle || '';
-      const displayText = [title, subtitle].filter(Boolean).join(', ') || item.text || '';
-      const point = item?.tags?.point || item?.point;
-      const coords = point && typeof point === 'object'
-        ? { latitude: Number(point.lat), longitude: Number(point.lon) }
-        : null;
-      return { text: displayText, coords };
-    }).filter((item) => item.text);
+    try {
+      const encodedText = encodeURIComponent(String(text));
+      
+      // КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Динамически меняем типы в зависимости от того, что ищем
+      // Если пришел kind=locality (из профиля) - ищем строго города
+      // Если пришел другой запрос (из событий) - ищем всё (улицы, дома)
+      const typesParam = kind === 'locality' ? '&types=locality' : '';
+      const yandexUrl = `https://suggest-maps.yandex.ru/v1/suggest?apikey=${apiKey}&text=${encodedText}${typesParam}&results=${results}&lang=${lang}`;
 
-    res.json({ results: normalized });
+      const response = await fetch(yandexUrl);
+      if (response.ok) {
+        const data = await response.json();
+        const results = (data.results || []).map((item) => {
+          const title = item.title?.text || item.title || '';
+          const subtitle = item.subtitle?.text || item.subtitle || '';
+          
+          // Для событий (где нет kind=locality) возвращаем полное название с улицей
+          // Для профиля (kind=locality) возвращаем только название города
+          const displayText = kind === 'locality' ? title : [title, subtitle].filter(Boolean).join(', ');
+
+          return {
+            text: displayText,
+            coords: item.tags?.point ? { latitude: Number(item.tags.point.lat), longitude: Number(item.tags.point.lon) } : null
+          };
+        });
+        return res.json({ results });
+      }
+      
+      const errText = await response.text();
+      console.error(`[GEO] Yandex Suggest API error: ${response.status}`, errText);
+      
+      // Если Suggest API не сработал, пробуем Geocoder как последний шанс, но только для городов
+      const geocodeUrl = `https://geocode-maps.yandex.ru/1.x/?apikey=${apiKey}&geocode=${encodedText}&format=json&results=${results}&lang=${lang}&kind=locality`;
+      const geoRes = await fetch(geocodeUrl);
+      if (geoRes.ok) {
+        const data = await geoRes.json();
+        const members = data?.response?.GeoObjectCollection?.featureMember || [];
+        const results = members.map((m) => {
+          const obj = m.GeoObject;
+          const pos = obj?.Point?.pos || '';
+          const [lon, lat] = pos.split(' ').map(Number);
+          return {
+            text: obj.name,
+            coords: lat && lon ? { latitude: lat, longitude: lon } : null
+          };
+        });
+        return res.json({ results });
+      }
+    } catch (err) {
+      console.error('[GEO] Proxy error:', err.message);
+    }
+
+    res.json({ results: [] });
   } catch (error) {
-    logError('geo.suggest', error);
-    res.status(500).json({ error: 'Failed to fetch suggestions' });
+    console.error('geo.suggest global error:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

@@ -41,22 +41,6 @@ export function useAddressSuggest(yandexMapsKey) {
         }
       }
 
-      if (addresses.length === 0) {
-        const osmResponse = await fetch(
-          `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&addressdetails=1&accept-language=ru&q=${encodeURIComponent(searchQuery)}`
-        );
-        if (osmResponse.ok) {
-          const osmData = await osmResponse.json();
-          addresses = (Array.isArray(osmData) ? osmData : []).map((item) => {
-            const address = item?.address || {};
-            const title = address.road || address.pedestrian || address.neighbourhood || item?.name || item?.display_name?.split(',')?.[0] || '';
-            const subtitle = [address.city || address.town || address.village || address.state, address.country].filter(Boolean).join(', ');
-            const fullAddress = item?.display_name || [title, subtitle].filter(Boolean).join(', ');
-            return { title, subtitle, fullAddress, type: 'geo' };
-          }).filter((item) => item.title || item.fullAddress);
-        }
-      }
-
       setSuggestions(addresses);
     } catch (err) {
       console.error('Address suggest error:', err);
@@ -88,21 +72,6 @@ export function useAddressSuggest(yandexMapsKey) {
               lon: parseFloat(lon),
             };
           }
-        }
-      }
-
-      const osmResponse = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=ru&q=${encodeURIComponent(searchText)}`
-      );
-      if (osmResponse.ok) {
-        const osmData = await osmResponse.json();
-        const first = Array.isArray(osmData) ? osmData[0] : null;
-        if (first) {
-          return {
-            address: first.display_name || searchText,
-            lat: parseFloat(first.lat),
-            lon: parseFloat(first.lon),
-          };
         }
       }
 

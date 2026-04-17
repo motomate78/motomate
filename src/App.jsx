@@ -6,47 +6,12 @@ import { Mail, Phone, MessageCircle, Send, FileText, ShieldCheck } from 'lucide-
 
 import { apiClient } from './apiClient';
 
-// Обработка ChunkLoadError для принудительной перезагрузки с очисткой кэша
-const forceReload = () => {
-  console.warn('Forcing hard reload to clear cache');
-  // Очищаем все кэши
-  if ('caches' in window) {
-    caches.keys().then(cacheNames => {
-      cacheNames.forEach(cacheName => {
-        caches.delete(cacheName);
-      });
-    });
-  }
-  // Перезагружаем с принудительной очисткой кэша
-  window.location.reload(true);
-};
-
-window.addEventListener('error', (event) => {
-  const errorMsg = event.message || '';
-  if (errorMsg.includes('Loading chunk') ||
-      errorMsg.includes('Failed to fetch dynamically imported') ||
-      errorMsg.includes('dynamically imported module')) {
-    console.warn('Chunk load error detected:', errorMsg);
-    forceReload();
-  }
-});
-
-window.addEventListener('unhandledrejection', (event) => {
-  const errorMsg = event.reason?.message || event.reason || '';
-  if (errorMsg.includes('Loading chunk') ||
-      errorMsg.includes('Failed to fetch dynamically imported') ||
-      errorMsg.includes('dynamically imported module')) {
-    console.warn('Chunk load error in promise:', errorMsg);
-    forceReload();
-  }
-});
-
 function App() {
   // Определяем, запущено ли приложение как PWA
-  const isPWA = window.matchMedia('(display-mode: standalone)').matches ||
-                 window.navigator.standalone ||
+  const isPWA = window.matchMedia('(display-mode: standalone)').matches || 
+                 window.navigator.standalone || 
                  document.referrer.includes('android-app://');
-
+  
   // Состояния
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isLoading, setIsLoading] = useState(true);

@@ -15,15 +15,17 @@ const PrivacySettings = ({ userData, setUserData }) => {
           <div className="text-[10px] text-zinc-500 mt-1">Скрыть мое местоположение на карте</div>
         </div>
         <button
+          type="button"
           onClick={handleTogglePrivacy}
           aria-pressed={Boolean(userData?.is_private)}
-          className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors duration-200 ${
-            userData?.is_private ? 'bg-orange-600' : 'bg-zinc-600'
+          className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+            userData?.is_private ? 'bg-orange-600' : 'bg-zinc-700'
           }`}
         >
           <span
-            className={`absolute left-0.5 h-6 w-6 transform rounded-full bg-white transition-transform duration-200 shadow-sm ${
-              userData?.is_private ? 'translate-x-5' : 'translate-x-0'
+            aria-hidden="true"
+            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+              userData?.is_private ? 'translate-x-2.5' : 'translate-x-0'
             }`}
           />
         </button>

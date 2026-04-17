@@ -15,8 +15,11 @@ export function CityAutocomplete({ value, onChange, placeholder = 'Введи с
 
   // Синхронизируем tempCity когда value меняется извне (например при загрузке профиля)
   useEffect(() => {
-    setTempCity(value);
-  }, [value]);
+    // Синхронизируем ТОЛЬКО если пользователь НЕ печатает в данный момент
+    if (!isOpen) {
+      setTempCity(value || '');
+    }
+  }, [value, isOpen]);
 
   const fetchCities = async (query) => {
     if (!query || query.length < 2) {
@@ -27,8 +30,9 @@ export function CityAutocomplete({ value, onChange, placeholder = 'Введи с
     setLoading(true);
     try {
       // Используем бэкенд прокси вместо прямого вызова Яндекса (избегаем CORS)
+      // Добавляем kind=locality для фильтрации только населенных пунктов
       const response = await fetch(
-        `/api/geo/suggest?text=${encodeURIComponent(query)}&type=geo&results=8&lang=ru_RU`
+        `/api/geo/suggest?text=${encodeURIComponent(query)}&type=geo&results=8&lang=ru_RU&kind=locality`
       );
 
       if (response.ok) {
@@ -53,23 +57,26 @@ export function CityAutocomplete({ value, onChange, placeholder = 'Введи с
   };
 
   const handleInputChange = (e) => {
-    const text = e.target.value;
-    setTempCity(text); // Обновляем только локальное состояние
-
-    if (debounceTimeoutRef.current) {
-      clearTimeout(debounceTimeoutRef.current);
-    }
-
-    if (text.length < 2) {
+    const newVal = e.target.value;
+    setTempCity(newVal);
+    
+    if (!newVal || newVal.trim().length === 0) {
       setSuggestions([]);
       setIsOpen(false);
+      onChange(''); // Позволяем полностью стереть
       return;
     }
 
-    setIsOpen(true); // Открываем dropdown при печати
-    debounceTimeoutRef.current = setTimeout(() => {
-      fetchCities(text);
-    }, 300);
+    if (newVal.trim().length >= 1) {
+      if (debounceTimeoutRef.current) clearTimeout(debounceTimeoutRef.current);
+      setIsOpen(true);
+      debounceTimeoutRef.current = setTimeout(() => {
+        fetchCities(newVal);
+      }, 300);
+    } else {
+      setSuggestions([]);
+      setIsOpen(false);
+    }
   };
 
   const handleSelectCity = (city) => {

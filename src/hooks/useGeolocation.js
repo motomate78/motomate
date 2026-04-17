@@ -33,20 +33,6 @@ export function useGeolocation(yandexMapsKey, autoRequest = false) {
         }
       }
 
-      if (!cityName) {
-        const nominatimResponse = await fetch(
-          `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&accept-language=ru`
-        );
-        if (nominatimResponse.ok) {
-          const nominatimData = await nominatimResponse.json();
-          cityName = nominatimData?.address?.city
-            || nominatimData?.address?.town
-            || nominatimData?.address?.village
-            || nominatimData?.address?.state
-            || '';
-        }
-      }
-
       if (cityName) {
         setCity(cityName);
         setCoordinates({ lat, lon });

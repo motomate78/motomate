@@ -609,12 +609,14 @@ const ApiManager = ({ userData, onUsersLoaded, onChatsLoaded, onEventsLoaded }) 
         if (ws.readyState === WebSocket.OPEN) ws.close();
       });
     };
-  }, [userData?.id]);
+  }, [userData?.id, userData?.city, userData?.gender]); // Re-initialize when city or gender changes
 
-  // Make API methods available globally
   useEffect(() => {
     window.apiManager = {
       ...apiMethods,
+      loadUsers,
+      loadChats,
+      loadEvents,
       sendNotification: (title, body, icon) => {
         if ('Notification' in window && Notification.permission === 'granted') {
           new Notification(title, { body, icon });
@@ -623,7 +625,7 @@ const ApiManager = ({ userData, onUsersLoaded, onChatsLoaded, onEventsLoaded }) 
       sendTypingIndicator,
       subscribeToTyping
     };
-  }, []);
+  }, [loadUsers, loadChats, loadEvents]);
 
   if (loading) {
     return (
