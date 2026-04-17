@@ -1316,9 +1316,6 @@ const MainApp = () => {
                 // Показываем пользователю что происходит сжатие
                 console.log('Сжимаем изображение...');
                 
-                // Сохраняем старую аватарку перед загрузкой новой
-                const oldAvatarUrl = userData?.image;
-                
                 const imageUrl = await userService.uploadAvatar(userId, file, null);
                 console.log('Avatar uploaded:', imageUrl);
                 
@@ -1330,33 +1327,6 @@ const MainApp = () => {
                     setUserData(prev => ({...prev}));
                 }, 100);
                 
-                // Если была старая аватарка, добавляем её в галерею
-                if (oldAvatarUrl && oldAvatarUrl !== imageUrl) {
-                  setUserImages(prevImages => {
-                    if (!prevImages.includes(oldAvatarUrl)) {
-                      const updated = [oldAvatarUrl, ...prevImages];
-                      localStorage.setItem('userImages', JSON.stringify(updated));
-                      return updated;
-                    }
-                    return prevImages;
-                  });
-                  
-                  // Сохраняем метаданные старой аватарки в БД как фото галереи
-                  try {
-                    const token = localStorage.getItem('motomate_token');
-                    await fetch('/api/users/profile/images', {
-                      method: 'POST',
-                      headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json'
-                      },
-                      body: JSON.stringify({ url: oldAvatarUrl })
-                    });
-                  } catch (dbErr) {
-                    console.warn('Failed to save old avatar to gallery db:', dbErr);
-                  }
-                }
-                
                 // Добавляем новую аватарку в начало галереи
                 setUserImages(prevImages => {
                   if (!prevImages.includes(imageUrl)) {
@@ -1367,7 +1337,7 @@ const MainApp = () => {
                   return prevImages;
                 });
                 
-                // Сохраняем метаданные новой аватарки в БД как фото галереи
+                // Сохраняем метаданные аватарки в БД как фото галереи
                 try {
                   const token = localStorage.getItem('motomate_token');
                   await fetch('/api/users/profile/images', {

@@ -810,18 +810,8 @@ router.put('/users/profile', authenticateToken, async (req, res) => {
       data,
     });
 
-    const previousImages = new Set([
-      ...(existingUser.image ? [existingUser.image] : []),
-      ...parseJsonArray(existingUser.images),
-    ]);
-    const nextImages = new Set([
-      ...(user.image ? [user.image] : []),
-      ...parseJsonArray(user.images),
-    ]);
-    const imagesToDelete = [...previousImages].filter((url) => !nextImages.has(url));
-    if (imagesToDelete.length) {
-      await Promise.allSettled(imagesToDelete.map((url) => deleteFromS3(url)));
-    }
+    // Don't auto-delete old avatars - let them stay in gallery
+    // previousImages/nextImages logic removed to preserve old avatars in gallery
 
     res.json(user);
   } catch (error) {
